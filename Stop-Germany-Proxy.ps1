@@ -42,15 +42,6 @@ elseif (Test-Path -LiteralPath $proxyBackupFile) {
     Remove-Item -LiteralPath $proxyBackupFile -Force -ErrorAction SilentlyContinue
 }
 else {
-    $wandaListening = [bool](Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 7892 -State Listen -ErrorAction SilentlyContinue)
-    if ($wandaListening) {
-        New-ItemProperty -Path $internetSettings -Name ProxyEnable -PropertyType DWord -Value 1 -Force | Out-Null
-        New-ItemProperty -Path $internetSettings -Name ProxyServer -PropertyType String -Value '127.0.0.1:7892' -Force | Out-Null
-        $restoredTo = '127.0.0.1:7892'
-    }
-    else {
-        New-ItemProperty -Path $internetSettings -Name ProxyEnable -PropertyType DWord -Value 0 -Force | Out-Null
-        $restoredTo = 'direct (ProxyEnable=0)'
-    }
+    $restoredTo = 'unchanged (no saved proxy state)'
 }
 Add-Content -LiteralPath $cleanupLog -Value "$([DateTime]::Now.ToString('s')) stopped; restored=$restoredTo"

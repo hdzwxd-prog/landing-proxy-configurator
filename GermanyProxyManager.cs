@@ -212,7 +212,7 @@ namespace GermanyProxyManager
             Controls.Add(applyClashButton);
 
             Label interfaceDefault = new Label();
-            interfaceDefault.Text = "常见默认值：127.0.0.1:7980（Clash Verge）";
+            interfaceDefault.Text = "端口以 Clash 实际配置为准；7890、7980 等均可";
             interfaceDefault.ForeColor = Gray;
             interfaceDefault.AutoSize = true;
             interfaceDefault.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -623,12 +623,7 @@ namespace GermanyProxyManager
             if (trayIcon != null)
                 trayIcon.Text = "德国代理切换器 - " + ModeDisplay(mode);
             string proxy = GetSystemProxy();
-            if (mode == "off" && port7892 && proxy != "127.0.0.1:7892")
-            {
-                SetSystemProxy("127.0.0.1:7892");
-                proxy = "127.0.0.1:7892";
-            }
-            else if (mode != "off" && mode != "apps" && port18484 && IsRouteHealthy() && proxy != "127.0.0.1:18484")
+            if (mode != "off" && mode != "apps" && port18484 && IsRouteHealthy() && proxy != "127.0.0.1:18484")
             {
                 SetSystemProxy("127.0.0.1:18484");
                 proxy = "127.0.0.1:18484";
@@ -703,9 +698,18 @@ namespace GermanyProxyManager
             try
             {
                 string value = File.ReadAllText(ClashEndpointFile).Trim();
-                return NormalizeEndpoint(value);
+                string endpoint = NormalizeEndpoint(value);
+                if (IsListening(ParseEndpointPort(endpoint))) return endpoint;
+                foreach (string candidate in new[] { "127.0.0.1:7890", "127.0.0.1:7980", "127.0.0.1:7897", "127.0.0.1:7891" })
+                    if (IsListening(ParseEndpointPort(candidate))) return candidate;
+                return endpoint;
             }
-            catch { return "127.0.0.1:7980"; }
+            catch
+            {
+                foreach (string candidate in new[] { "127.0.0.1:7890", "127.0.0.1:7980", "127.0.0.1:7897", "127.0.0.1:7891" })
+                    if (IsListening(ParseEndpointPort(candidate))) return candidate;
+                return "127.0.0.1:7890";
+            }
         }
 
         private static string ReadUpstreamChoice()
