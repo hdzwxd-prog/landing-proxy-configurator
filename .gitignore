@@ -4,3 +4,8 @@
 __pycache__/
 providers/
 *.download.tmp
+
+# Legacy local integration artifacts
+Test-*
+Update-Germany-Upstreams.ps1
+ui-check.png
