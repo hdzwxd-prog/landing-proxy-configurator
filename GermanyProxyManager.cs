@@ -72,6 +72,7 @@ namespace GermanyProxyManager
         private const string StartScript = @"C:\Users\250010031\.ssh\Start-Germany-Router.ps1";
         private const string UpstreamScript = @"C:\Users\250010031\.ssh\GermanyRouter\Set-Germany-Upstream.ps1";
         private const string InternetSettings = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+        private const string ProxyBackupFile = @"C:\Users\250010031\.ssh\GermanyRouter\proxy-restore.txt";
 
         private readonly Color Navy = Color.FromArgb(24, 49, 83);
         private readonly Color Blue = Color.FromArgb(34, 113, 219);
@@ -454,6 +455,8 @@ namespace GermanyProxyManager
                 }
                 else
                 {
+                    if (previousMode == "off" && mode != "apps") SaveProxyState();
+                    if (mode == "apps" && previousMode != "apps") RestoreSavedProxy();
                     File.WriteAllText(ModeFile, mode);
                     if (previousMode == "foreign" || previousMode == "global" || previousMode == "apps")
                         RunRestart();
@@ -808,6 +811,39 @@ namespace GermanyProxyManager
                     .Any(endpoint => endpoint.Port == port);
             }
             catch { return false; }
+        }
+
+        private static void SaveProxyState()
+        {
+            if (File.Exists(ProxyBackupFile)) return;
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(InternetSettings))
+            {
+                if (key == null) return;
+                File.WriteAllLines(ProxyBackupFile, new[] {
+                    "ProxyEnable=" + Convert.ToInt32(key.GetValue("ProxyEnable", 0)),
+                    "ProxyServer=" + Convert.ToString(key.GetValue("ProxyServer", "")),
+                    "ProxyOverride=" + Convert.ToString(key.GetValue("ProxyOverride", ""))
+                });
+            }
+        }
+
+        private static void RestoreSavedProxy()
+        {
+            if (!File.Exists(ProxyBackupFile)) return;
+            var values = File.ReadAllLines(ProxyBackupFile).ToDictionary(
+                line => line.Split(new[] { '=' }, 2)[0],
+                line => line.Contains("=") ? line.Substring(line.IndexOf('=') + 1) : "");
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(InternetSettings, true))
+            {
+                if (key == null) return;
+                int enabled;
+                if (!Int32.TryParse(values.ContainsKey("ProxyEnable") ? values["ProxyEnable"] : "0", out enabled)) enabled = 0;
+                key.SetValue("ProxyEnable", enabled, RegistryValueKind.DWord);
+                key.SetValue("ProxyServer", values.ContainsKey("ProxyServer") ? values["ProxyServer"] : "", RegistryValueKind.String);
+                key.SetValue("ProxyOverride", values.ContainsKey("ProxyOverride") ? values["ProxyOverride"] : "", RegistryValueKind.String);
+            }
+            InternetSetOption(IntPtr.Zero, 39, IntPtr.Zero, 0);
+            InternetSetOption(IntPtr.Zero, 37, IntPtr.Zero, 0);
         }
 
         private static string GetSystemProxy()

@@ -5,6 +5,7 @@ $modeFile = Join-Path $routerDir 'mode.txt'
 $previousMode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
 $cleanupLog = Join-Path $routerDir 'cleanup.log'
 $internetSettings = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+$proxyBackupFile = Join-Path $routerDir 'proxy-restore.txt'
 
 Set-Content -LiteralPath $modeFile -Value 'off' -Encoding ascii
 
@@ -26,6 +27,20 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
 if ($previousMode -eq 'apps') {
     $restoredTo = 'unchanged (apps-only mode)'
 }
+elseif (Test-Path -LiteralPath $proxyBackupFile) {
+    $saved = @{}
+    foreach ($line in Get-Content -LiteralPath $proxyBackupFile) {
+        $parts = $line -split '=', 2
+        if ($parts.Count -eq 2) { $saved[$parts[0]] = $parts[1] }
+    }
+    $enabled = 0
+    [int]::TryParse([string]$saved['ProxyEnable'], [ref]$enabled) | Out-Null
+    New-ItemProperty -Path $internetSettings -Name ProxyEnable -PropertyType DWord -Value $enabled -Force | Out-Null
+    New-ItemProperty -Path $internetSettings -Name ProxyServer -PropertyType String -Value ([string]$saved['ProxyServer']) -Force | Out-Null
+    New-ItemProperty -Path $internetSettings -Name ProxyOverride -PropertyType String -Value ([string]$saved['ProxyOverride']) -Force | Out-Null
+    $restoredTo = "saved proxy ($([string]$saved['ProxyServer']))"
+    Remove-Item -LiteralPath $proxyBackupFile -Force -ErrorAction SilentlyContinue
+}
 else {
     $wandaListening = [bool](Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 7892 -State Listen -ErrorAction SilentlyContinue)
     if ($wandaListening) {
@@ -38,17 +53,4 @@ else {
         $restoredTo = 'direct (ProxyEnable=0)'
     }
 }
-
-$winInetCode = @'
-using System;
-using System.Runtime.InteropServices;
-public static class GermanyProxyCleanupWinInet {
-    [DllImport("wininet.dll", SetLastError=true)]
-    public static extern bool InternetSetOption(IntPtr hInternet, int option, IntPtr buffer, int length);
-}
-'@
-Add-Type $winInetCode -ErrorAction SilentlyContinue
-[GermanyProxyCleanupWinInet]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0) | Out-Null
-[GermanyProxyCleanupWinInet]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0) | Out-Null
-
 Add-Content -LiteralPath $cleanupLog -Value "$([DateTime]::Now.ToString('s')) stopped; restored=$restoredTo"
