@@ -103,6 +103,8 @@ namespace GermanyProxyManager
         private bool allowExit;
         private bool cleanupDone;
         private bool trayNoticeShown;
+        private bool hasExitTest;
+        private bool lastExitIsGermany;
 
         public MainForm()
         {
@@ -460,6 +462,7 @@ namespace GermanyProxyManager
             {
                 Directory.CreateDirectory(RouterDir);
                 string previousMode = ReadMode();
+                hasExitTest = false;
 
                 if (mode == "off")
                 {
@@ -503,6 +506,7 @@ namespace GermanyProxyManager
                     return;
                 }
 
+                hasExitTest = false;
                 RunRestart();
                 resultLabel.ForeColor = Orange;
                 resultLabel.Text = "正在通过 Clash 接口重连；系统代理保持 18484，验证前不会暴露其他出口。";
@@ -521,6 +525,7 @@ namespace GermanyProxyManager
             {
                 string endpoint = NormalizeEndpoint(clashEndpointBox.Text);
                 clashEndpointBox.Text = endpoint;
+                hasExitTest = false;
                 RunHiddenChecked(
                     "powershell.exe",
                     "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" +
@@ -582,6 +587,8 @@ namespace GermanyProxyManager
                 string value = response.Trim();
                 if (mode == "off")
                 {
+                    hasExitTest = true;
+                    lastExitIsGermany = false;
                     resultLabel.ForeColor = Blue;
                     resultLabel.Text = wandaAvailable
                         ? "WandaCloud 当前出口：" + value
@@ -590,6 +597,8 @@ namespace GermanyProxyManager
                 else
                 {
                     bool isGermany = value == "192.248.188.234" || value == "2a05:f480:1800:2d04:5400:5ff:fe92:1848";
+                    hasExitTest = true;
+                    lastExitIsGermany = isGermany;
                     string expected = isGermany ? "德国服务器" : "其他出口";
                     resultLabel.ForeColor = isGermany ? Green : Red;
                     resultLabel.Text = "公网 IP：" + value + "    判定：" + expected;
@@ -663,6 +672,12 @@ namespace GermanyProxyManager
                 SetStatus(wandaStatus, "● Clash 接口 " + endpoint, clashListening);
                 return;
             }
+            if (!clashListening)
+            {
+                wandaStatus.Text = "● Clash 接口 " + endpoint + "  未连接";
+                wandaStatus.ForeColor = Red;
+                return;
+            }
             try
             {
                 FileInfo health = new FileInfo(UpstreamHealthFile);
@@ -671,7 +686,7 @@ namespace GermanyProxyManager
                 string active = ReadHealthValue(value, "active");
                 if (ageSeconds > 60)
                 {
-                    wandaStatus.Text = "● Clash 接口 " + endpoint + "  状态待更新";
+                    wandaStatus.Text = "● Clash 接口 " + endpoint + "  接口正常，链路待检测";
                     wandaStatus.ForeColor = Orange;
                 }
                 else if (active == "Clash-Upstream")
@@ -757,6 +772,11 @@ namespace GermanyProxyManager
                     tunnelStatus.Text = "● 德国落地 443  健康";
                     tunnelStatus.ForeColor = Green;
                 }
+                else if (routerListening && hasExitTest && lastExitIsGermany)
+                {
+                    tunnelStatus.Text = "● 德国落地 443  出口检测通过";
+                    tunnelStatus.ForeColor = Green;
+                }
                 else if (value.Contains("state=starting"))
                 {
                     tunnelStatus.Text = "● 德国落地 443  验证中";
@@ -771,6 +791,11 @@ namespace GermanyProxyManager
                 {
                     tunnelStatus.Text = "● 德国落地 443  历史回退状态";
                     tunnelStatus.ForeColor = Red;
+                }
+                else if (routerListening)
+                {
+                    tunnelStatus.Text = "● 德国落地 443  运行中，等待出口检测";
+                    tunnelStatus.ForeColor = Orange;
                 }
                 else
                 {
