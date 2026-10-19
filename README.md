@@ -7,6 +7,7 @@ Windows 桌面托盘程序，用于把本机系统代理固定到独立的 Mihom
 1. 在 Clash / Clash Verge 中添加任意订阅，并在 Clash 自己的代理组里选择订阅和节点。
 2. 打开“落地代理配置器”，在“Clash 接口”填写 Clash 提供的本地 HTTP/SOCKS 混合接口，例如 `127.0.0.1:7980`。
 3. 点击“应用接口”，选择“仅非中国走德国”或“全局走德国”，再用“出口检测”确认公网 IP。
+   程序启动和托盘驻留只读取状态，不会自动把 Windows 系统代理改成 18484；需要更新显示时点击“刷新状态”。
 4. 订阅 URL、订阅名称和节点名称都不写入本程序；程序只消费 Clash 的本地代理接口。
 5. 选择“仅 Claude/浏览器”时，程序只启动 18484，不改 Windows 全局代理；使用桌面上的 `Claude-落地代理.ps1` 或 `Edge-落地代理.ps1` 启动对应应用。Edge 使用独立的 `LandingProxyEdgeProfile`，现有 Edge 窗口不会被接管。
 6. 选择“关闭德国转发”或退出程序后，18484 停止；Clash Verge/WandaCloud 自己的进程和端口不由本程序停止。
@@ -27,7 +28,7 @@ Windows 桌面托盘程序，用于把本机系统代理固定到独立的 Mihom
 本机没有要求安装 .NET SDK；使用 Windows Framework C# 编译器即可：
 
 ```powershell
-& "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /out:落地代理配置器.exe /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Net.Http.dll .\GermanyProxyManager.cs
+& "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /win32manifest:app.manifest /out:落地代理配置器.exe /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Net.Http.dll .\GermanyProxyManager.cs
 ```
 
 不要把 `%USERPROFILE%\.ssh\GermanyRouter` 下的 controller secret、VLESS UUID、WebSocket 路径或运行时配置提交到公开仓库。

@@ -94,6 +94,7 @@ namespace GermanyProxyManager
         private Button appsButton;
         private Button testButton;
         private Button reconnectButton;
+        private Button refreshStatusButton;
         private TextBox clashEndpointBox;
         private Button applyClashButton;
         private Timer statusTimer;
@@ -165,6 +166,20 @@ namespace GermanyProxyManager
 
             Label statusTitle = CreateSectionTitle("运行状态", new Point(26, 17));
             statusCard.Controls.Add(statusTitle);
+
+            refreshStatusButton = new Button();
+            refreshStatusButton.Text = "刷新状态";
+            refreshStatusButton.Size = new Size(112, 38);
+            refreshStatusButton.Location = new Point(900, 12);
+            StyleActionButton(refreshStatusButton, Color.White, Navy);
+            refreshStatusButton.FlatAppearance.BorderColor = Color.FromArgb(190, 201, 214);
+            refreshStatusButton.Click += delegate
+            {
+                RefreshStatus();
+                resultLabel.ForeColor = Blue;
+                resultLabel.Text = "状态已刷新；需要验证公网出口时请点击“检测出口”。";
+            };
+            statusCard.Controls.Add(refreshStatusButton);
 
             wandaStatus = CreateStatusLabel("● Clash 接口 读取中", new Point(26, 62));
             tunnelStatus = CreateStatusLabel("● 德国落地 443", new Point(370, 62));
@@ -491,6 +506,7 @@ namespace GermanyProxyManager
                 RunRestart();
                 resultLabel.ForeColor = Orange;
                 resultLabel.Text = "正在通过 Clash 接口重连；系统代理保持 18484，验证前不会暴露其他出口。";
+                RefreshStatus();
             }
             catch (Exception ex)
             {
@@ -587,6 +603,7 @@ namespace GermanyProxyManager
             finally
             {
                 testButton.Enabled = true;
+                RefreshStatus();
             }
         }
 
@@ -623,11 +640,6 @@ namespace GermanyProxyManager
             if (trayIcon != null)
                 trayIcon.Text = "德国代理切换器 - " + ModeDisplay(mode);
             string proxy = GetSystemProxy();
-            if (mode != "off" && mode != "apps" && port18484 && IsRouteHealthy() && proxy != "127.0.0.1:18484")
-            {
-                SetSystemProxy("127.0.0.1:18484");
-                proxy = "127.0.0.1:18484";
-            }
             systemProxyValue.Text = "系统代理：" + (string.IsNullOrEmpty(proxy) ? "未启用" : proxy);
 
             HighlightMode(offButton, mode == "off");
