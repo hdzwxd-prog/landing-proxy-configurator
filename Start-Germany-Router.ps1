@@ -22,6 +22,7 @@ $controllerSecretFile = Join-Path $routerDir 'controller-secret.txt'
 $refreshScript = Join-Path $routerDir 'Update-Germany-Upstreams.ps1'
 $ensureClashScript = Join-Path $routerDir 'Ensure-Clash-Upstream.ps1'
 $clashEndpointFile = Join-Path $routerDir 'clash-upstream.txt'
+$proxyBackupFile = Join-Path $routerDir 'proxy-restore.txt'
 $desktopUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $internetSettingsSubKey = "$desktopUserSid\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
 $mihomo = 'D:\Software\Clash Verge\verge-mihomo.exe'
@@ -54,7 +55,48 @@ function Notify-ProxyChange {
     [GermanyRouterWinInet]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0) | Out-Null
 }
 
+function Save-BaseProxy {
+    if (Test-Path -LiteralPath $proxyBackupFile) { return }
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::Users, [Microsoft.Win32.RegistryView]::Registry64
+    )
+    $key = $base.OpenSubKey($internetSettingsSubKey, $false)
+    try {
+        Set-Content -LiteralPath $proxyBackupFile -Encoding utf8 -Value @(
+            "ProxyEnable=$([int]$key.GetValue('ProxyEnable', 0))"
+            "ProxyServer=$([string]$key.GetValue('ProxyServer', ''))"
+            "ProxyOverride=$([string]$key.GetValue('ProxyOverride', ''))"
+        )
+    }
+    finally { $key.Dispose(); $base.Dispose() }
+}
+
+function Restore-BaseProxy([string]$reason) {
+    if (-not (Test-Path -LiteralPath $proxyBackupFile)) { return }
+    $saved = @{}
+    foreach ($line in Get-Content -LiteralPath $proxyBackupFile) {
+        $parts = $line -split '=', 2
+        if ($parts.Count -eq 2) { $saved[$parts[0]] = $parts[1] }
+    }
+    $enabled = 0
+    [int]::TryParse([string]$saved['ProxyEnable'], [ref]$enabled) | Out-Null
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::Users, [Microsoft.Win32.RegistryView]::Registry64
+    )
+    $key = $base.OpenSubKey($internetSettingsSubKey, $true)
+    try {
+        $key.SetValue('ProxyEnable', $enabled, [Microsoft.Win32.RegistryValueKind]::DWord)
+        $key.SetValue('ProxyServer', [string]$saved['ProxyServer'], [Microsoft.Win32.RegistryValueKind]::String)
+        $key.SetValue('ProxyOverride', [string]$saved['ProxyOverride'], [Microsoft.Win32.RegistryValueKind]::String)
+    }
+    finally { $key.Dispose(); $base.Dispose() }
+    Notify-ProxyChange
+    Remove-Item -LiteralPath $proxyBackupFile -Force -ErrorAction SilentlyContinue
+    Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) FALLBACK-BASE reason=$reason restored=$([string]$saved['ProxyServer'])"
+}
+
 function Set-SystemProxy([string]$proxy) {
+    if ($mode -ne 'apps') { Save-BaseProxy }
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
         [Microsoft.Win32.RegistryHive]::Users, [Microsoft.Win32.RegistryView]::Registry64
     )
@@ -269,7 +311,7 @@ try {
     while ($true) {
         Start-Sleep -Seconds 2
         $currentMode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
-        if ($currentMode -notin @('foreign','global')) { break }
+        if ($currentMode -notin @('foreign','global','apps')) { break }
         if ($routerProcess.HasExited) { Set-FailClosed 'Router process exited unexpectedly'; break }
 
         $settings = Get-SystemProxyFresh
@@ -308,6 +350,11 @@ catch {
     Set-FailClosed "Supervisor exception: $($_.Exception.Message)"
 }
 finally {
+    try {
+        $finalMode = if (Test-Path -LiteralPath $modeFile) { (Get-Content -LiteralPath $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
+        if ($finalMode -ne 'apps') { Restore-BaseProxy 'landing supervisor exited' }
+    }
+    catch { Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) FALLBACK-BASE failed=$($_.Exception.Message)" }
     $mutex.ReleaseMutex()
     $mutex.Dispose()
 }
