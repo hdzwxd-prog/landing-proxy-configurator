@@ -678,6 +678,12 @@ namespace GermanyProxyManager
                 wandaStatus.ForeColor = Red;
                 return;
             }
+            if (hasExitTest && lastExitIsGermany)
+            {
+                wandaStatus.Text = "● Clash 接口 " + endpoint + "  链路检测通过";
+                wandaStatus.ForeColor = Green;
+                return;
+            }
             try
             {
                 FileInfo health = new FileInfo(UpstreamHealthFile);
