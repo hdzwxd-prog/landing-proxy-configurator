@@ -1,0 +1,53 @@
+mixed-port: 18484
+allow-lan: false
+mode: rule
+log-level: warning
+external-controller: 127.0.0.1:19090
+secret: <CONTROLLER_SECRET>
+find-process-mode: 'off'
+geodata-mode: true
+geo-auto-update: true
+geo-update-interval: 24
+
+proxies:
+  - name: Clash-Upstream
+    type: http
+    server: 127.0.0.1
+    port: 7980
+    udp: false
+  - name: Wanda-Upstream
+    type: socks5
+    server: 127.0.0.1
+    port: 7892
+    udp: true
+  - name: Germany-VLESS
+    type: vless
+    server: v2.mhrooz.xyz
+    port: 443
+    uuid: <VLESS_UUID>
+    network: ws
+    tls: true
+    servername: v2.mhrooz.xyz
+    skip-cert-verify: false
+    ws-opts:
+      path: /<WS_PATH>
+      headers:
+        Host: v2.mhrooz.xyz
+    dialer-proxy: FIRST-HOP
+
+proxy-groups:
+  - name: FIRST-HOP
+    type: select
+    proxies: [Clash-Upstream, Wanda-Upstream]
+  - name: FOREIGN
+    type: select
+    proxies: [Germany-VLESS]
+
+rules:
+  - DOMAIN-SUFFIX,slai.edu.cn,DIRECT
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - GEOSITE,CN,DIRECT
+  - GEOIP,CN,DIRECT
+  - MATCH,FOREIGN

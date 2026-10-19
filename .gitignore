@@ -1,0 +1,6 @@
+*.exe
+*.pdb
+*.bak-*
+__pycache__/
+providers/
+*.download.tmp
