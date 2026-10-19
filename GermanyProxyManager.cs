@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -60,19 +60,21 @@ namespace GermanyProxyManager
 
     internal sealed class MainForm : Form
     {
-        private const string RouterDir = @"C:\Users\250010031\.ssh\GermanyRouter";
-        private const string ModeFile = @"C:\Users\250010031\.ssh\GermanyRouter\mode.txt";
-        private const string RouteHealthFile = @"C:\Users\250010031\.ssh\GermanyRouter\route-health.txt";
-        private const string UpstreamHealthFile = @"C:\Users\250010031\.ssh\GermanyRouter\upstream-health.txt";
-        private const string UpstreamChoiceFile = @"C:\Users\250010031\.ssh\GermanyRouter\upstream-choice.txt";
-        private const string ClashEndpointFile = @"C:\Users\250010031\.ssh\GermanyRouter\clash-upstream.txt";
+        private static readonly string RouterDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\GermanyRouter");
+        private static readonly string ModeFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\GermanyRouter\mode.txt");
+        private static readonly string RouteHealthFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\GermanyRouter\route-health.txt");
+        private static readonly string UpstreamHealthFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\GermanyRouter\upstream-health.txt");
+        private static readonly string UpstreamChoiceFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\GermanyRouter\upstream-choice.txt");
+        private static readonly string ClashEndpointFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\GermanyRouter\clash-upstream.txt");
         private const string RouterTask = "Germany Rule Router 18484";
-        private const string CleanupScript = @"C:\Users\250010031\.ssh\Stop-Germany-Proxy.ps1";
-        private const string RestartScript = @"C:\Users\250010031\.ssh\Restart-Germany-Router.ps1";
-        private const string StartScript = @"C:\Users\250010031\.ssh\Start-Germany-Router.ps1";
-        private const string UpstreamScript = @"C:\Users\250010031\.ssh\GermanyRouter\Set-Germany-Upstream.ps1";
+        private static readonly string CleanupScript = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\Stop-Germany-Proxy.ps1");
+        private static readonly string RestartScript = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\Restart-Germany-Router.ps1");
+        private static readonly string StartScript = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\Start-Germany-Router.ps1");
+        private static readonly string UpstreamScript = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\GermanyRouter\Set-Germany-Upstream.ps1");
+        private static readonly string LandingChoiceFile = RouterDir + @"\landing-choice.txt";
+        private static readonly string LandingScript = RouterDir + @"\Set-Landing-Exit.ps1";
         private const string InternetSettings = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
-        private const string ProxyBackupFile = @"C:\Users\250010031\.ssh\GermanyRouter\proxy-restore.txt";
+        private static readonly string ProxyBackupFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\GermanyRouter\proxy-restore.txt");
 
         private readonly Color Navy = Color.FromArgb(24, 49, 83);
         private readonly Color Blue = Color.FromArgb(34, 113, 219);
@@ -97,6 +99,14 @@ namespace GermanyProxyManager
         private Button refreshStatusButton;
         private TextBox clashEndpointBox;
         private Button applyClashButton;
+        private ComboBox upstreamChoiceBox;
+        private Button applyUpstreamButton;
+        private ComboBox landingChoiceBox;
+        private Button applyLandingButton;
+        private DateTime lastExitTestAt;
+        private string lastExitChoice;
+        private string lastTestRoute;
+        private bool routeBusy;
         private Timer statusTimer;
         private NotifyIcon trayIcon;
         private ToolStripMenuItem trayStatusItem;
@@ -104,14 +114,15 @@ namespace GermanyProxyManager
         private bool cleanupDone;
         private bool trayNoticeShown;
         private bool hasExitTest;
-        private bool lastExitIsGermany;
+        private bool lastExitMatches;
 
         public MainForm()
         {
             Text = "落地代理配置器";
             AutoScaleMode = AutoScaleMode.None;
-            ClientSize = new Size(1100, 900);
-            MinimumSize = new Size(1100, 900);
+            ClientSize = new Size(1100, 960);
+            AutoScroll = true;
+            MinimumSize = new Size(1100, 760);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Color.FromArgb(246, 248, 251);
             Font = new Font("Microsoft YaHei UI", 18F, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -156,7 +167,7 @@ namespace GermanyProxyManager
             header.Controls.Add(title);
 
             Label subtitle = new Label();
-            subtitle.Text = "连接任意 Clash 兼容本地接口；订阅和节点在 Clash 内选择，最终固定从德国出口";
+            subtitle.Text = "订阅和节点在 Clash / Wanda 内选择；这里选择独立的落地出口";
             subtitle.ForeColor = Color.FromArgb(194, 211, 232);
             subtitle.AutoSize = true;
             subtitle.Font = new Font("Microsoft YaHei UI", 17F, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -175,30 +186,29 @@ namespace GermanyProxyManager
             refreshStatusButton.Location = new Point(900, 12);
             StyleActionButton(refreshStatusButton, Color.White, Navy);
             refreshStatusButton.FlatAppearance.BorderColor = Color.FromArgb(190, 201, 214);
-            refreshStatusButton.Click += delegate
-            {
-                RefreshStatus();
-                resultLabel.ForeColor = Blue;
-                resultLabel.Text = "状态已刷新；需要验证公网出口时请点击“检测出口”。";
-            };
+            refreshStatusButton.Click += async delegate { await TestExitAsync(); };
             statusCard.Controls.Add(refreshStatusButton);
 
-            wandaStatus = CreateStatusLabel("● Clash 接口 读取中", new Point(26, 62));
-            tunnelStatus = CreateStatusLabel("● 德国落地 443", new Point(370, 62));
-            routerStatus = CreateStatusLabel("● 分流入口 18484", new Point(715, 62));
+            wandaStatus = CreateStatusLabel("● Clash 接口 读取中", new Point(26, 55));
+            tunnelStatus = CreateStatusLabel("● 落地出口", new Point(26, 84));
+            routerStatus = CreateStatusLabel("● 分流入口 18484", new Point(715, 84));
+            wandaStatus.AutoSize = false;
+            wandaStatus.Size = new Size(850, 28);
+            tunnelStatus.AutoSize = false;
+            tunnelStatus.Size = new Size(680, 28);
             statusCard.Controls.Add(wandaStatus);
             statusCard.Controls.Add(tunnelStatus);
             statusCard.Controls.Add(routerStatus);
 
             modeValue = new Label();
             modeValue.AutoSize = true;
-            modeValue.Location = new Point(26, 108);
+            modeValue.Location = new Point(26, 118);
             modeValue.ForeColor = Gray;
             statusCard.Controls.Add(modeValue);
 
             systemProxyValue = new Label();
             systemProxyValue.AutoSize = true;
-            systemProxyValue.Location = new Point(540, 108);
+            systemProxyValue.Location = new Point(540, 118);
             systemProxyValue.ForeColor = Gray;
             statusCard.Controls.Add(systemProxyValue);
 
@@ -206,7 +216,7 @@ namespace GermanyProxyManager
             Controls.Add(interfaceTitle);
 
             Label interfaceHint = new Label();
-            interfaceHint.Text = "在 Clash / Clash Verge 中选择订阅和节点，这里只填写它提供的本地 HTTP/SOCKS 接口。";
+            interfaceHint.Text = "填写本地混合 / HTTP 端口；端口以客户端配置为准（7890 / 7980 等）。";
             interfaceHint.ForeColor = Gray;
             interfaceHint.AutoSize = true;
             interfaceHint.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -225,39 +235,88 @@ namespace GermanyProxyManager
             applyClashButton.Size = new Size(130, 42);
             applyClashButton.Location = new Point(410, 378);
             StyleActionButton(applyClashButton, Blue, Color.White);
-            applyClashButton.Click += delegate { ApplyClashEndpoint(); };
+            applyClashButton.Click += async delegate {
+                try { await ApplyRouteAsync(UpstreamScript, "-Choice clash -Endpoint \"" + NormalizeEndpoint(clashEndpointBox.Text) + "\""); }
+                catch (Exception ex) { resultLabel.Text = ex.Message; resultLabel.ForeColor = Red; }
+            };
             Controls.Add(applyClashButton);
 
             Label interfaceDefault = new Label();
-            interfaceDefault.Text = "端口以 Clash 实际配置为准；7890、7980 等均可";
+            interfaceDefault.Text = "第一跳来源";
             interfaceDefault.ForeColor = Gray;
             interfaceDefault.AutoSize = true;
             interfaceDefault.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Regular, GraphicsUnit.Pixel);
-            interfaceDefault.Location = new Point(560, 388);
+            interfaceDefault.Location = new Point(560, 350);
             Controls.Add(interfaceDefault);
 
-            Label selectTitle = CreateSectionTitle("选择转发模式", new Point(32, 448));
+            upstreamChoiceBox = new ComboBox();
+            upstreamChoiceBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            upstreamChoiceBox.Items.Add("当前 Clash 接口");
+            upstreamChoiceBox.Items.Add("WandaCloud 7892");
+            upstreamChoiceBox.Location = new Point(560, 378);
+            upstreamChoiceBox.Size = new Size(220, 42);
+            upstreamChoiceBox.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Regular, GraphicsUnit.Pixel);
+            upstreamChoiceBox.SelectedIndex = UpstreamChoiceIndex(ReadUpstreamChoice());
+            Controls.Add(upstreamChoiceBox);
+
+            applyUpstreamButton = new Button();
+            applyUpstreamButton.Text = "应用第一跳";
+            applyUpstreamButton.Size = new Size(125, 42);
+            applyUpstreamButton.Location = new Point(792, 378);
+            StyleActionButton(applyUpstreamButton, Blue, Color.White);
+            applyUpstreamButton.Click += async delegate {
+                try {
+                    string choice = UpstreamChoiceFromIndex(upstreamChoiceBox.SelectedIndex);
+                    string extra = choice == "clash" ? " -Endpoint \"" + NormalizeEndpoint(clashEndpointBox.Text) + "\"" : "";
+                    await ApplyRouteAsync(UpstreamScript, "-Choice " + choice + extra);
+                } catch (Exception ex) { resultLabel.Text = ex.Message; resultLabel.ForeColor = Red; }
+            };
+            Controls.Add(applyUpstreamButton);
+
+            Label landingTitle = CreateSectionTitle("落地出口", new Point(32, 438));
+            Controls.Add(landingTitle);
+            landingChoiceBox = new ComboBox();
+            landingChoiceBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            landingChoiceBox.Font = new Font("Microsoft YaHei UI", 17F, FontStyle.Regular, GraphicsUnit.Pixel);
+            landingChoiceBox.Items.Add("原德国出口  ·  192.248.188.234");
+            landingChoiceBox.Items.Add("NAS04  ·  212.121.132.230  ·  SSH");
+            landingChoiceBox.Location = new Point(170, 438);
+            landingChoiceBox.Size = new Size(410, 38);
+            landingChoiceBox.SelectedIndex = ReadLandingChoice() == "nas04" ? 1 : 0;
+            Controls.Add(landingChoiceBox);
+            applyLandingButton = new Button();
+            applyLandingButton.Text = "应用落地";
+            applyLandingButton.Size = new Size(130, 40);
+            applyLandingButton.Location = new Point(600, 432);
+            StyleActionButton(applyLandingButton, Blue, Color.White);
+            applyLandingButton.Click += async delegate {
+                string choice = landingChoiceBox.SelectedIndex == 1 ? "nas04" : "germany";
+                await ApplyRouteAsync(LandingScript, "-Choice " + choice);
+            };
+            Controls.Add(applyLandingButton);
+
+            Label selectTitle = CreateSectionTitle("选择转发模式", new Point(32, 500));
             Controls.Add(selectTitle);
 
             offButton = CreateModeButton(
-                "关闭德国转发",
-                "停止德国转发和分流服务\r\n系统代理保持 127.0.0.1:7892",
-                new Point(28, 488)
+                "关闭落地转发",
+                "停止落地服务\r\nClash / Wanda 保持运行",
+                new Point(28, 540)
             );
             foreignButton = CreateModeButton(
-                "仅非中国走德国",
-                "中国域名/IP 直接访问\r\n其余流量走德国",
-                new Point(294, 488)
+                "仅非中国走落地",
+                "中国域名/IP 直接访问\r\n其余流量走所选出口",
+                new Point(294, 540)
             );
             globalButton = CreateModeButton(
-                "全局走德国",
-                "本机/局域网保持直连\r\n所有公共流量走德国",
-                new Point(560, 488)
+                "全局走落地",
+                "本机/局域网保持直连\r\n公共流量走所选出口",
+                new Point(560, 540)
             );
             appsButton = CreateModeButton(
                 "仅 Claude/浏览器",
-                "不改全局代理；\r\n用专用启动器走德国",
-                new Point(826, 488)
+                "不改全局代理；\r\n用专用启动器走落地",
+                new Point(826, 540)
             );
             Controls.Add(offButton);
             Controls.Add(foreignButton);
@@ -269,7 +328,7 @@ namespace GermanyProxyManager
             globalButton.Click += delegate { ApplyMode("global"); };
             appsButton.Click += delegate { ApplyMode("apps"); };
 
-            Panel testCard = CreateCard(new Point(28, 660), new Size(1044, 150));
+            Panel testCard = CreateCard(new Point(28, 712), new Size(1044, 150));
             Controls.Add(testCard);
 
             Label testTitle = CreateSectionTitle("出口检测", new Point(26, 17));
@@ -304,7 +363,7 @@ namespace GermanyProxyManager
             footer.Text = "点 × 会最小化到托盘并保持转发；托盘右键“彻底退出”才会停止服务并恢复网络。";
             footer.ForeColor = Gray;
             footer.AutoSize = true;
-            footer.Location = new Point(32, 842);
+            footer.Location = new Point(32, 900);
             Controls.Add(footer);
         }
 
@@ -466,14 +525,13 @@ namespace GermanyProxyManager
 
                 if (mode == "off")
                 {
-                    File.WriteAllText(ModeFile, mode);
                     RunCleanup();
                     resultLabel.ForeColor = Green;
-                    resultLabel.Text = "德国转发已关闭，后台服务已停止，网络已恢复。";
+                    resultLabel.Text = "落地转发已关闭，后台服务已停止，网络已恢复。";
                 }
                 else
                 {
-                    if (previousMode == "off" && mode != "apps") SaveProxyState();
+                    if ((previousMode == "off" || previousMode == "apps") && mode != "apps") SaveProxyState();
                     if (mode == "apps" && previousMode != "apps") RestoreSavedProxy();
                     File.WriteAllText(ModeFile, mode);
                     if (previousMode == "foreign" || previousMode == "global" || previousMode == "apps")
@@ -483,7 +541,7 @@ namespace GermanyProxyManager
                     resultLabel.ForeColor = Orange;
                     resultLabel.Text = mode == "apps"
                         ? "正在启动仅应用模式；请使用桌面上的 Claude/浏览器落地启动器。"
-                        : "正在通过 Clash 接口验证德国出口；异常时保持 18484，防止出口泄露。";
+                        : "正在通过所选上游验证落地出口……";
                 }
                 RefreshStatus();
             }
@@ -502,14 +560,14 @@ namespace GermanyProxyManager
                 if (mode == "off")
                 {
                     resultLabel.ForeColor = Gray;
-                    resultLabel.Text = "德国转发当前已关闭，无需重新连接。";
+                    resultLabel.Text = "落地转发当前已关闭，无需重新连接。";
                     return;
                 }
 
                 hasExitTest = false;
                 RunRestart();
                 resultLabel.ForeColor = Orange;
-                resultLabel.Text = "正在通过 Clash 接口重连；系统代理保持 18484，验证前不会暴露其他出口。";
+                resultLabel.Text = "正在重连所选链路；仅应用模式保持系统代理不变。";
                 RefreshStatus();
             }
             catch (Exception ex)
@@ -519,27 +577,74 @@ namespace GermanyProxyManager
             }
         }
 
-        private void ApplyClashEndpoint()
+        private async Task ApplyRouteAsync(string script, string arguments)
         {
+            if (routeBusy) return;
+            routeBusy = true;
+            hasExitTest = false;
+            SetRouteControls(false);
+            resultLabel.ForeColor = Orange;
+            resultLabel.Text = "正在应用并检测所选链路……";
             try
             {
-                string endpoint = NormalizeEndpoint(clashEndpointBox.Text);
-                clashEndpointBox.Text = endpoint;
-                hasExitTest = false;
-                RunHiddenChecked(
-                    "powershell.exe",
-                    "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" +
-                    UpstreamScript + "\" -Choice clash -Endpoint \"" + endpoint + "\""
-                );
-                resultLabel.ForeColor = Orange;
-                resultLabel.Text = "Clash 接口已应用；请在 Clash 中选择订阅和节点，再点击“重新连接”。";
-                RefreshStatus();
+                await Task.Run(delegate { RunHiddenChecked("powershell.exe",
+                    "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + script + "\" " + arguments); });
+                if (ReadMode() == "off") resultLabel.Text = "选择已保存；启用转发模式后连接。";
+                else await TestExitAsync();
             }
             catch (Exception ex)
             {
                 resultLabel.ForeColor = Red;
-                resultLabel.Text = "Clash 接口应用失败：" + ex.Message;
+                resultLabel.Text = ex.Message;
             }
+            finally
+            {
+                routeBusy = false;
+                SetRouteControls(true);
+                upstreamChoiceBox.SelectedIndex = UpstreamChoiceIndex(ReadUpstreamChoice());
+                landingChoiceBox.SelectedIndex = ReadLandingChoice() == "nas04" ? 1 : 0;
+                RefreshStatus();
+            }
+        }
+
+        private void SetRouteControls(bool enabled)
+        {
+            foreach (Control control in new Control[] {applyClashButton, applyUpstreamButton,
+                applyLandingButton, clashEndpointBox, upstreamChoiceBox, landingChoiceBox,
+                offButton, foreignButton, globalButton, appsButton, reconnectButton,
+                testButton, refreshStatusButton}) control.Enabled = enabled;
+        }
+
+        private static string ReadLandingChoice()
+        {
+            try { if (File.ReadAllText(LandingChoiceFile).Trim() == "nas04") return "nas04"; }
+            catch { }
+            return "germany";
+        }
+
+        private static bool MatchesLanding(string ip, string choice)
+        {
+            return choice == "nas04" ? ip == "212.121.132.230"
+                : ip == "192.248.188.234" || ip == "2a05:f480:1800:2d04:5400:5ff:fe92:1848";
+        }
+
+        private bool ExitResultIsFresh()
+        {
+            return hasExitTest && lastExitChoice == ReadLandingChoice()
+                && lastTestRoute == ReadUpstreamChoice() + "|" + ReadClashEndpoint() + "|" + ReadMode()
+                && (DateTime.Now - lastExitTestAt).TotalSeconds < 60;
+        }
+
+        private static int UpstreamChoiceIndex(string choice)
+        {
+            if (choice == "wanda") return 1;
+            return 0;
+        }
+
+        private static string UpstreamChoiceFromIndex(int index)
+        {
+            if (index == 1) return "wanda";
+            return "clash";
         }
 
         private static string NormalizeEndpoint(string value)
@@ -551,8 +656,7 @@ namespace GermanyProxyManager
             int port;
             if (parts.Length != 2 || String.IsNullOrWhiteSpace(parts[0]) || !Int32.TryParse(parts[1], out port) || port < 1 || port > 65535)
                 throw new InvalidOperationException("接口格式应为 host:port，例如 127.0.0.1:7980");
-            IPAddress parsed;
-            if (!IPAddress.TryParse(parts[0], out parsed) && parts[0].IndexOfAny(new[] { ' ', '/', '\\' }) >= 0)
+            if (!System.Text.RegularExpressions.Regex.IsMatch(parts[0], @"^[a-zA-Z0-9.-]+$"))
                 throw new InvalidOperationException("接口主机名无效");
             return parts[0] + ":" + port;
         }
@@ -560,6 +664,10 @@ namespace GermanyProxyManager
         private async Task TestExitAsync()
         {
             testButton.Enabled = false;
+            refreshStatusButton.Enabled = false;
+            hasExitTest = false;
+            string testedChoice = ReadLandingChoice();
+            string testedRoute = ReadUpstreamChoice() + "|" + ReadClashEndpoint() + "|" + ReadMode();
             resultLabel.ForeColor = Gray;
             resultLabel.Text = "正在检测出口……";
 
@@ -567,14 +675,15 @@ namespace GermanyProxyManager
             {
                 string mode = ReadMode();
                 if (mode != "off" && !IsListening(18484))
-                    throw new InvalidOperationException("德国转发未连接，请点击“重新连接”。");
+                    throw new InvalidOperationException("落地转发未连接，请点击“重新连接”。");
 
-                bool wandaAvailable = IsListening(7892);
+                string baseEndpoint = ReadUpstreamChoice() == "wanda" ? "127.0.0.1:7892" : ReadClashEndpoint();
+                bool wandaAvailable = IsListening(ParseEndpointPort(baseEndpoint));
                 string proxy;
                 string url;
                 if (mode == "off")
                 {
-                    proxy = wandaAvailable ? "http://127.0.0.1:7892" : null;
+                    proxy = wandaAvailable ? "http://" + baseEndpoint : null;
                     url = wandaAvailable ? "https://api.ipify.org" : "http://myip.ipip.net";
                 }
                 else
@@ -588,18 +697,18 @@ namespace GermanyProxyManager
                 if (mode == "off")
                 {
                     hasExitTest = true;
-                    lastExitIsGermany = false;
+                    lastExitMatches = false;
                     resultLabel.ForeColor = Blue;
                     resultLabel.Text = wandaAvailable
-                        ? "WandaCloud 当前出口：" + value
+                        ? "上游当前出口：" + value
                         : "本地网络：" + value;
                 }
                 else
                 {
-                    bool isGermany = value == "192.248.188.234" || value == "2a05:f480:1800:2d04:5400:5ff:fe92:1848";
+                    bool isGermany = MatchesLanding(value, testedChoice);
                     hasExitTest = true;
-                    lastExitIsGermany = isGermany;
-                    string expected = isGermany ? "德国服务器" : "其他出口";
+                    lastExitMatches = isGermany;
+                    string expected = isGermany ? (testedChoice == "nas04" ? "NAS04 出口通过" : "原德国出口通过") : "与所选出口不符";
                     resultLabel.ForeColor = isGermany ? Green : Red;
                     resultLabel.Text = "公网 IP：" + value + "    判定：" + expected;
                 }
@@ -607,11 +716,17 @@ namespace GermanyProxyManager
             catch (Exception ex)
             {
                 resultLabel.ForeColor = Red;
+                hasExitTest = true;
+                lastExitMatches = false;
                 resultLabel.Text = "检测失败：" + ex.Message;
             }
             finally
             {
-                testButton.Enabled = true;
+                lastExitChoice = testedChoice;
+                lastTestRoute = testedRoute;
+                lastExitTestAt = DateTime.Now;
+                testButton.Enabled = !routeBusy;
+                refreshStatusButton.Enabled = !routeBusy;
                 RefreshStatus();
             }
         }
@@ -636,10 +751,13 @@ namespace GermanyProxyManager
         private void RefreshStatus()
         {
             string mode = ReadMode();
-            bool port7892 = IsListening(7892) || IsListening(ParseEndpointPort(ReadClashEndpoint()));
+            string upstreamChoice = ReadUpstreamChoice();
+            bool upstreamListening = upstreamChoice == "wanda"
+                    ? IsListening(7892)
+                    : IsListening(ParseEndpointPort(ReadClashEndpoint()));
             bool port18484 = IsListening(18484);
 
-            SetUpstreamStatus(mode, port7892);
+            SetUpstreamStatus(mode, upstreamListening);
             SetLandingStatus(mode, port18484);
             SetStatus(routerStatus, "● 分流入口 18484", port18484);
 
@@ -656,6 +774,7 @@ namespace GermanyProxyManager
             HighlightMode(globalButton, mode == "global");
             HighlightMode(appsButton, mode == "apps");
             if (clashEndpointBox != null && !clashEndpointBox.Focused) clashEndpointBox.Text = ReadClashEndpoint();
+
         }
 
         private void SetStatus(Label label, string text, bool ok)
@@ -667,21 +786,25 @@ namespace GermanyProxyManager
         private void SetUpstreamStatus(string mode, bool clashListening)
         {
             string endpoint = ReadClashEndpoint();
+            string choice = ReadUpstreamChoice();
+            string label = choice == "wanda"
+                    ? "● WandaCloud 7892"
+                    : "● Clash 接口 " + endpoint;
             if (mode == "off")
             {
-                SetStatus(wandaStatus, "● Clash 接口 " + endpoint, clashListening);
+                SetStatus(wandaStatus, label, clashListening);
                 return;
             }
             if (!clashListening)
             {
-                wandaStatus.Text = "● Clash 接口 " + endpoint + "  未连接";
+                wandaStatus.Text = label + "  未连接";
                 wandaStatus.ForeColor = Red;
                 return;
             }
-            if (hasExitTest && lastExitIsGermany)
+            if (ExitResultIsFresh())
             {
-                wandaStatus.Text = "● Clash 接口 " + endpoint + "  链路检测通过";
-                wandaStatus.ForeColor = Green;
+                wandaStatus.Text = label + (lastExitMatches ? "  链路检测通过" : "  链路检测失败");
+                wandaStatus.ForeColor = lastExitMatches ? Green : Red;
                 return;
             }
             try
@@ -692,12 +815,12 @@ namespace GermanyProxyManager
                 string active = ReadHealthValue(value, "active");
                 if (ageSeconds > 60)
                 {
-                    wandaStatus.Text = "● Clash 接口 " + endpoint + "  接口正常，链路待检测";
+                    wandaStatus.Text = label + "  接口正常，链路待检测";
                     wandaStatus.ForeColor = Orange;
                 }
                 else if (active == "Clash-Upstream")
                 {
-                    wandaStatus.Text = "● Clash 接口 " + endpoint;
+                    wandaStatus.Text = label;
                     wandaStatus.ForeColor = value.Contains("state=healthy") || value.Contains("state=manual") ? Green : Orange;
                 }
                 else if (active == "Wanda-Upstream")
@@ -707,13 +830,13 @@ namespace GermanyProxyManager
                 }
                 else
                 {
-                    wandaStatus.Text = "● Clash 接口 " + endpoint + "  验证中";
+                    wandaStatus.Text = label + "  验证中";
                     wandaStatus.ForeColor = Orange;
                 }
             }
             catch
             {
-                wandaStatus.Text = "● Clash 接口 " + endpoint + "  状态未知";
+                wandaStatus.Text = label + "  状态未知";
                 wandaStatus.ForeColor = Orange;
             }
         }
@@ -750,70 +873,37 @@ namespace GermanyProxyManager
             try
             {
                 string value = File.ReadAllText(UpstreamChoiceFile).Trim().ToLowerInvariant();
-                if (value == "bigairport" || value == "wanda") return value;
+                if (value == "clash" || value == "wanda") return value;
             }
             catch { }
-            return "wanda";
+            return "clash";
         }
 
         private void SetLandingStatus(string mode, bool routerListening)
         {
-            try
-            {
-                FileInfo health = new FileInfo(RouteHealthFile);
-                string value = health.Exists ? File.ReadAllText(RouteHealthFile) : "";
-                double ageSeconds = health.Exists ? (DateTime.Now - health.LastWriteTime).TotalSeconds : 999;
-                if (mode == "off" && value.Contains("state=fallback"))
-                {
-                    tunnelStatus.Text = "● 德国落地 443  历史回退状态";
-                    tunnelStatus.ForeColor = Orange;
-                }
-                else if (mode == "off")
-                {
-                    tunnelStatus.Text = "● 德国落地 443  待命";
-                    tunnelStatus.ForeColor = Gray;
-                }
-                else if (routerListening && ageSeconds <= 30 && value.Contains("state=healthy"))
-                {
-                    tunnelStatus.Text = "● 德国落地 443  健康";
-                    tunnelStatus.ForeColor = Green;
-                }
-                else if (routerListening && hasExitTest && lastExitIsGermany)
-                {
-                    tunnelStatus.Text = "● 德国落地 443  出口检测通过";
-                    tunnelStatus.ForeColor = Green;
-                }
-                else if (value.Contains("state=starting"))
-                {
-                    tunnelStatus.Text = "● 德国落地 443  验证中";
-                    tunnelStatus.ForeColor = Orange;
-                }
-                else if (value.Contains("state=degraded"))
-                {
-                    tunnelStatus.Text = "● 德国落地 443  波动，保持德国出口";
-                    tunnelStatus.ForeColor = Orange;
-                }
-                else if (value.Contains("state=fallback"))
-                {
-                    tunnelStatus.Text = "● 德国落地 443  历史回退状态";
-                    tunnelStatus.ForeColor = Red;
-                }
-                else if (routerListening)
-                {
-                    tunnelStatus.Text = "● 德国落地 443  运行中，等待出口检测";
-                    tunnelStatus.ForeColor = Orange;
-                }
-                else
-                {
-                    tunnelStatus.Text = "● 德国落地 443  未连接";
-                    tunnelStatus.ForeColor = Orange;
-                }
+            string choice = ReadLandingChoice();
+            string label = choice == "nas04" ? "● NAS04 212.121.132.230" : "● 德国 192.248.188.234";
+            string state = "待检测";
+            Color color = Orange;
+            if (mode == "off") { state = "待命"; color = Gray; }
+            else if (!routerListening) { state = "未连接"; color = Red; }
+            else if (ExitResultIsFresh()) {
+                state = lastExitMatches ? "出口检测通过" : "出口检测失败";
+                color = lastExitMatches ? Green : Red;
             }
-            catch
-            {
-                tunnelStatus.Text = "● 德国落地 443  状态未知";
-                tunnelStatus.ForeColor = Orange;
+            else {
+                try {
+                    FileInfo file = new FileInfo(RouteHealthFile);
+                    string value = file.Exists ? File.ReadAllText(RouteHealthFile) : "";
+                    string expected = choice == "nas04" ? "212.121.132.230" : "192.248.188.234";
+                    bool matches = value.Contains("exit=" + expected) || (choice == "germany" && value.Contains("exit=2a05:f480:1800:2d04:5400:5ff:fe92:1848"));
+                    if (file.Exists && (DateTime.Now - file.LastWriteTime).TotalSeconds <= 60 && matches && value.Contains("state=healthy")) {
+                        state = "出口健康"; color = Green;
+                    }
+                } catch { }
             }
+            tunnelStatus.Text = label + "  " + state;
+            tunnelStatus.ForeColor = color;
         }
 
         private static bool IsRouteHealthy()
@@ -837,10 +927,10 @@ namespace GermanyProxyManager
 
         private static string ModeDisplay(string mode)
         {
-            if (mode == "foreign") return "仅非中国走德国";
-            if (mode == "global") return "全局走德国";
+            if (mode == "foreign") return "仅非中国走落地";
+            if (mode == "global") return "全局走落地";
             if (mode == "apps") return "仅 Claude/浏览器";
-            return "关闭德国转发";
+            return "关闭落地转发";
         }
 
         private static int ParseEndpointPort(string endpoint)
@@ -891,6 +981,7 @@ namespace GermanyProxyManager
             }
             InternetSetOption(IntPtr.Zero, 39, IntPtr.Zero, 0);
             InternetSetOption(IntPtr.Zero, 37, IntPtr.Zero, 0);
+            File.Delete(ProxyBackupFile);
         }
 
         private static string GetSystemProxy()
@@ -983,11 +1074,13 @@ namespace GermanyProxyManager
             info.Arguments = arguments;
             info.UseShellExecute = false;
             info.CreateNoWindow = true;
+            info.RedirectStandardError = true;
             Process process = Process.Start(info);
-            if (!process.WaitForExit(30000))
+            Task<string> errorRead = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(90000))
                 throw new InvalidOperationException("操作超时");
             if (process.ExitCode != 0)
-                throw new InvalidOperationException("操作失败，退出码 " + process.ExitCode);
+                throw new InvalidOperationException("应用失败：" + errorRead.Result.Trim());
         }
 
         [DllImport("wininet.dll", SetLastError = true)]

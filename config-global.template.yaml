@@ -6,6 +6,9 @@ external-controller: 127.0.0.1:19090
 secret: <CONTROLLER_SECRET>
 find-process-mode: 'off'
 
+tunnels:
+  - tcp,127.0.0.1:18584,212.121.132.230:22,FIRST-HOP
+
 proxies:
   - name: Clash-Upstream
     type: http
@@ -17,6 +20,11 @@ proxies:
     server: 127.0.0.1
     port: 7892
     udp: true
+  - name: NAS04-SSH
+    type: socks5
+    server: 127.0.0.1
+    port: 18583
+    udp: false
   - name: Germany-VLESS
     type: vless
     server: v2.mhrooz.xyz
@@ -33,12 +41,15 @@ proxies:
     dialer-proxy: FIRST-HOP
 
 proxy-groups:
+  - name: LANDING
+    type: select
+    proxies: [Germany-VLESS, NAS04-SSH]
   - name: FIRST-HOP
     type: select
     proxies: [Clash-Upstream, Wanda-Upstream]
   - name: GERMANY
     type: select
-    proxies: [Germany-VLESS]
+    proxies: [LANDING]
 
 rules:
   - DOMAIN-SUFFIX,slai.edu.cn,DIRECT

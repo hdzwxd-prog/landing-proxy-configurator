@@ -1,6 +1,6 @@
-$ErrorActionPreference = 'Continue'
+﻿$ErrorActionPreference = 'Continue'
 
-$routerDir = 'C:\Users\250010031\.ssh\GermanyRouter'
+$routerDir = Join-Path $env:USERPROFILE '.ssh\GermanyRouter'
 $modeFile = Join-Path $routerDir 'mode.txt'
 $previousMode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
 $cleanupLog = Join-Path $routerDir 'cleanup.log'
@@ -17,12 +17,15 @@ Start-Sleep -Milliseconds 700
 # own core or unrelated SSH sessions.
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
-        ($_.Name -eq 'verge-mihomo.exe' -and $_.CommandLine -like '*\.ssh\GermanyRouter*') -or
+        $_.ProcessId -ne $PID -and (
+        ($_.Name -in @('verge-mihomo.exe','landing-router-core.exe') -and $_.CommandLine -like '*\.ssh\GermanyRouter*') -or
         ($_.Name -eq 'ssh.exe' -and $_.CommandLine -like '*-D 127.0.0.1:18483*') -or
         ($_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*Start-Germany-Router.ps1*') -or
-        ($_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*Start-Germany-Socks.ps1*')
+        ($_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*Start-Germany-Socks.ps1*'))
     } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+& (Join-Path $PSScriptRoot 'Stop-NAS04-Socks.ps1')
 
 if ($previousMode -eq 'apps') {
     $restoredTo = 'unchanged (apps-only mode)'

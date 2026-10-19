@@ -13,12 +13,17 @@ def build(path: pathlib.Path) -> None:
     data['secret'] = secret
     data['find-process-mode'] = 'off'
     data.pop('proxy-providers', None)
-    proxies = [p for p in data.get('proxies', []) if p.get('name') not in {'Clash-Upstream', 'BigAirport-SG'}]
+    proxies = [p for p in data.get('proxies', []) if p.get('name') not in {'Clash-Upstream', 'BigAirport-SG', 'NAS04-SSH'}]
     proxies.insert(0, {'name':'Clash-Upstream','type':'http','server':host,'port':int(port_text),'udp':False})
+    proxies.insert(1, {'name':'NAS04-SSH','type':'socks5','server':'127.0.0.1','port':18583,'udp':False})
     data['proxies'] = proxies
     germany = next(p for p in proxies if p.get('name') == 'Germany-VLESS')
     germany['dialer-proxy'] = 'FIRST-HOP'
-    terminal_groups = [g for g in data.get('proxy-groups', []) if g.get('name') not in {'BigAirport-SG','FIRST-HOP'}]
+    terminal_groups = [g for g in data.get('proxy-groups', []) if g.get('name') not in {'BigAirport-SG','FIRST-HOP','LANDING'}]
+    for group in terminal_groups:
+        group['proxies'] = ['LANDING' if name == 'Germany-VLESS' else name for name in group.get('proxies', [])]
+    data['tunnels'] = ['tcp,127.0.0.1:18584,212.121.132.230:22,FIRST-HOP']
+    terminal_groups.insert(0, {'name':'LANDING','type':'select','proxies':['Germany-VLESS','NAS04-SSH']})
     data['proxy-groups'] = [{'name':'FIRST-HOP','type':'select','proxies':['Clash-Upstream','Wanda-Upstream']}, *terminal_groups]
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=4096), encoding='utf-8')
 def main() -> int:

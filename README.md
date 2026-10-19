@@ -1,34 +1,56 @@
 # 落地代理配置器
 
-Windows 桌面托盘程序，用于把本机系统代理固定到独立的 Mihomo 入口 `127.0.0.1:18484`，再由该入口通过德国 VLESS/WSS 落地。第一跳现在通过一个可配置的 Clash 兼容本地接口连接，默认读取本机 Clash 兼容接口；端口以现场配置为准（常见为 `7890` 或 `7980`）。程序不调用 Clash/Wanda API，也不停止、重启或改写它们。
+独立的 Windows 托盘程序。Clash / Clash Verge / WandaCloud 管理订阅和节点，本程序读取其本地代理接口，再连接用户选择的落地出口。程序不启动、停止或配置 Clash/Wanda，不修改其订阅、节点、端口或 TUN。
 
-## 使用方式
+## 两个独立选择
 
-1. 在 Clash / Clash Verge 中添加任意订阅，并在 Clash 自己的代理组里选择订阅和节点。
-2. 打开“落地代理配置器”，在“Clash 接口”填写 Clash 提供的本地 HTTP/SOCKS 混合接口，例如 `127.0.0.1:7980`。
-3. 点击“应用接口”，选择“仅非中国走德国”或“全局走德国”，再用“出口检测”确认公网 IP。
-   程序启动和托盘驻留只读取状态，不会自动把 Windows 系统代理改成 18484；需要更新显示时点击“刷新状态”。
-4. 订阅 URL、订阅名称和节点名称都不写入本程序；程序只消费 Clash 的本地代理接口。
-5. 选择“仅 Claude/浏览器”时，程序只启动 18484，不改 Windows 全局代理；使用桌面上的 `Claude-落地代理.ps1` 或 `Edge-落地代理.ps1` 启动对应应用。Edge 使用独立的 `LandingProxyEdgeProfile`，现有 Edge 窗口不会被接管。
-6. 选择“关闭德国转发”或退出程序后，18484 停止；Clash Verge/WandaCloud 自己的进程和端口不由本程序停止。
+- **第一跳来源**：本地 Clash 混合 / HTTP 接口（现场端口为 7980；其他端口按客户端实际配置填写），或 WandaCloud SOCKS 7892。软件不再保存或选择任何订阅 / 节点。旧 BigAirport 入口迁移到已有的 Clash 本地接口。
+- **落地出口**：原德国 VLESS/WSS `192.248.188.234:443`，或 NAS04 `212.121.132.230`（SSH 用户 `h50055690`）。NAS04 是替代的最终出口，不是叠加在德国前面的第一跳。
 
-程序保留 `Wanda-Upstream` 作为兼容接口，但不再把 BigAirport 或任何单一订阅当作产品逻辑。选择文件和配置位于 `%USERPROFILE%\.ssh\GermanyRouter`，源代码和脚本在本目录。
+链路：
 
-## 链式代理关系
+```text
+应用 -> 独立入口 18484 -> 所选 Clash/Wanda 接口 -> 所选落地 -> 网站
+                                               ├ 原德国：VLESS/WSS 443
+                                               └ NAS04：SSH 22
+```
 
-本程序使用 Mihomo 的 `dialer-proxy`：德国 `Germany-VLESS` 连接通过 `FIRST-HOP` 组建立，`FIRST-HOP` 当前指向 Clash 的本地接口。它和 Clash Verge/Mihomo 的链式代理是同一种内核机制，但这里是两个独立的 Mihomo 实例：Clash Verge 负责订阅和节点选择，独立 18484 实例负责德国落地和 Windows 系统代理。它不是把 Clash Verge 的订阅复制进本程序，也不是自动选择节点。
+NAS04 使用 Windows OpenSSH 动态 SOCKS：本地 `18583` 提供 SOCKS，`18584` 将 SSH 字节流通过 `FIRST-HOP` 转发至 NAS04 的 22 端口。SSH 只连接 loopback 转发端口，以 NAS04 原地址验证已知主机密钥；上游不可用时不会直连 NAS04。无需在 NAS04 安装新服务。SSH 密钥及 known_hosts 仍由 OpenSSH 管理，程序不存密码。
 
-参考：
+## 使用
 
-- Mihomo `dialer-proxy` 文档：<https://wiki.metacubex.one/en/config/proxies/dialer-proxy/>
-- Clash Verge Rev 配置文档：<https://github.com/clash-verge-rev/clash-verge-rev.github.io/blob/main/docs/guide/config.md>
+1. 自行启动 Clash/Wanda，并在客户端内选择订阅和节点。
+2. 打开桌面“落地代理配置器”，按实际端口填写接口并点击“应用接口”；使用 Wanda 时选第一跳来源并点击“应用第一跳”。
+3. 在“落地出口”中选择原德国或 NAS04，点击“应用落地”。运行时会检测实际公网 IP；失败则保留原选择。关闭模式只保存选择，启用后才连接。
+4. 推荐“仅 Claude/浏览器”：保持系统代理不变，使用桌面上的 Claude/Edge 落地启动器。Edge 使用独立用户目录，已有窗口不接管。其他应用（包括 Codex）继续使用原系统代理。
+5. “刷新状态”和“检测出口”均进行真实出口检测并同步更新状态。成功结果只在同一链路内短期有效；失败、切换或过期不会继续显示旧的绿色成功结果。
 
-## 构建
+“仅非中国”和“全局”模式会将系统代理指向 18484，因而可能影响跟随系统代理的 Codex。“仅 Claude/浏览器”不会这么做。点 × 是收进托盘；“彻底退出”才停落地服务。独立应用中已经建立的连接是否重试/回落取决于客户端；本程序不保证所有程序在异常退出后都能无缝迁移已有连接。
 
-本机没有要求安装 .NET SDK；使用 Windows Framework C# 编译器即可：
+## 源码、配置和升级
+
+本仓库是源码；本机运行配置位于 `%USERPROFILE%\.ssh\GermanyRouter`，SSH 启停和路由监督脚本位于 `%USERPROFILE%\.ssh`。`landing-choice.txt` 保存落地选择，`upstream-choice.txt` 保存上游选择。敏感运行配置不进入 Git。
+
+- `GermanyProxyManager.cs`：界面、状态检测。
+- `Landing.Common.ps1`、`Set-Landing-Exit.ps1`：出口验证、运行时选择和失败回滚。
+- `Ensure-Clash-Upstream.ps1`：更新自有配置，保留本机现有节点凭据。
+- `Start-NAS04-Socks.ps1`、`Stop-NAS04-Socks.ps1`：隧道及精确 PID/创建时间清理。
+- `Start-Germany-Router.ps1`：自有 Mihomo 监督，不控制上游客户端。独立核心使用 `landing-router-core.exe`，避免上游按 Clash 核心进程名识别时发生回环排除。首次启动从本机 Mihomo 复制内核，不修改 Clash 原文件。
+
+构建（无需 .NET SDK）：运行 `powershell -File .\Build.ps1`，产物在 `bin/LandingProxyConfigurator.exe`；也可使用下面的命令。
 
 ```powershell
 & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /win32manifest:app.manifest /out:落地代理配置器.exe /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Net.Http.dll .\GermanyProxyManager.cs
 ```
 
-不要把 `%USERPROFILE%\.ssh\GermanyRouter` 下的 controller secret、VLESS UUID、WebSocket 路径或运行时配置提交到公开仓库。
+部署时，将 `Landing.Common.ps1`、`Set-Landing-Exit.ps1`、`Set-Germany-Upstream.ps1`、`Ensure-Clash-Upstream.ps1` 放入 `GermanyRouter`；其余运行脚本放入 `.ssh`。先备份待替换文件，再编译并更新桌面 EXE。代码中的部署路径对应本机用户。更新监督脚本时需要加载新监督进程；保留已有 Mihomo 及系统代理，避免中断其他应用。
+
+## 验证
+
+`python tests/test_landing.py --report <report.json>` 使用独立 18684 / 19690 / 18683 / 18682 端口，验证两个实际出口、SSH 经第一跳、切回清理、上游不可用时禁止直连、失败保留原选择和关闭模式保存行为。需要本机 Mihomo、Python + PyYAML、可用 Clash 接口和已有 NAS04 SSH 密钥。前后对比系统代理、生产监听 PID 和选择文件；不关闭上游客户端进行故障测试。凭据临时副本仅在 `.ssh` 下使用并清理。
+
+此实现与 Clash Verge 链式代理使用相同的 Mihomo 能力，但实例和配置独立。原德国使用 `dialer-proxy`，NAS04 使用显式代理的 TCP 隧道。
+
+参考：[Mihomo 流量隧道](https://wiki.metacubex.one/config/tunnels/)、[dialer-proxy](https://wiki.metacubex.one/en/config/proxies/dialer-proxy/)。
+
+不要提交运行时 YAML、controller secret、VLESS UUID、WebSocket 路径、订阅链接、SSH 私钥或密码。

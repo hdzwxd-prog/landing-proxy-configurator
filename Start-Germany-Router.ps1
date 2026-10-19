@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Continue'
+﻿$ErrorActionPreference = 'Continue'
 $mutex = [Threading.Mutex]::new($false, 'Local\GermanyRuleRouter18484')
 if (-not $mutex.WaitOne(0)) { exit 0 }
 
@@ -19,15 +19,19 @@ $upstreamHealthFile = Join-Path $routerDir 'upstream-health.txt'
 $upstreamChoiceFile = Join-Path $routerDir 'upstream-choice.txt'
 $supervisorLog = Join-Path $routerDir 'supervisor.log'
 $controllerSecretFile = Join-Path $routerDir 'controller-secret.txt'
-$refreshScript = Join-Path $routerDir 'Update-Germany-Upstreams.ps1'
 $ensureClashScript = Join-Path $routerDir 'Ensure-Clash-Upstream.ps1'
+$startNas04Script = Join-Path $routerDir '..\Start-NAS04-Socks.ps1'
+$stopNas04Script = Join-Path $routerDir '..\Stop-NAS04-Socks.ps1'
 $clashEndpointFile = Join-Path $routerDir 'clash-upstream.txt'
 $proxyBackupFile = Join-Path $routerDir 'proxy-restore.txt'
 $desktopUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $internetSettingsSubKey = "$desktopUserSid\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-$mihomo = 'D:\Software\Clash Verge\verge-mihomo.exe'
+$mihomo = Join-Path $routerDir 'landing-router-core.exe'
+if (-not (Test-Path $mihomo)) { Copy-Item -LiteralPath 'D:\Software\Clash Verge\verge-mihomo.exe' -Destination $mihomo -ErrorAction Stop }
 $controller = 'http://127.0.0.1:19090'
-$germanyExits = @('192.248.188.234','2a05:f480:1800:2d04:5400:5ff:fe92:1848')
+$runtimeScripts = $PSScriptRoot
+. (Join-Path $routerDir 'Landing.Common.ps1')
+$changeMutex = [Threading.Mutex]::new($false, 'Local\LandingRouteChange19090')
 $routerProcess = $null
 $script:lastGermanExit = ''
 
@@ -35,6 +39,7 @@ function Write-Health([string]$state, [string]$detail) {
     Set-Content -LiteralPath $healthFile -Encoding utf8 -Value @(
         "timestamp=$([DateTime]::Now.ToString('s'))"
         "state=$state"
+        "landing=$(Get-LandingChoice)"
         "detail=$detail"
     )
 }
@@ -128,24 +133,6 @@ function Get-SystemProxyFresh {
     finally { $key.Dispose(); $base.Dispose() }
 }
 
-function Restart-EdgeNetworkService {
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.Name -eq 'msedge.exe' -and
-            $_.CommandLine -like '*--utility-sub-type=network.mojom.NetworkService*'
-        } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-}
-
-function Restart-CodexNetworkService {
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.Name -eq 'ChatGPT.exe' -and
-            $_.CommandLine -like '*--utility-sub-type=network.mojom.NetworkService*'
-        } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-}
-
 function Set-FailClosed([string]$reason) {
     if ($mode -ne 'apps') { Set-SystemProxy '127.0.0.1:18484' }
     Write-Health 'degraded' "$reason; fail_closed=127.0.0.1:18484"
@@ -153,30 +140,9 @@ function Set-FailClosed([string]$reason) {
 }
 
 function Test-GermanExit {
-    foreach ($url in @('https://api.ipify.org','https://ifconfig.me/ip')) {
-        try {
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            [Net.ServicePointManager]::CheckCertificateRevocationList = $false
-            $request = [Net.HttpWebRequest]::Create($url)
-            $request.Proxy = New-Object Net.WebProxy('http://127.0.0.1:18484')
-            $request.Timeout = 8000
-            $request.ReadWriteTimeout = 8000
-            $request.UserAgent = 'GermanyProxySupervisor/3.0'
-            $response = $request.GetResponse()
-            $reader = New-Object IO.StreamReader($response.GetResponseStream())
-            $value = $reader.ReadToEnd().Trim()
-            $reader.Dispose(); $response.Dispose()
-            if ($germanyExits -contains $value) {
-                $script:lastGermanExit = $value
-                return $true
-            }
-            Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) health mismatch url=$url exit=$value"
-        }
-        catch {
-            Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) health error url=$url error=$($_.Exception.Message)"
-        }
-    }
-    return $false
+    $ok = Test-LandingExit (Get-LandingChoice)
+    if ($ok) { $script:lastGermanExit = $script:verifiedExit }
+    return $ok
 }
 
 function Get-ControllerHeaders {
@@ -208,28 +174,12 @@ function Set-FirstHop([string]$name, [string]$reason) {
     }
 }
 
-function Test-BigAirportDelay {
-    try {
-        $group = [Uri]::EscapeDataString('BigAirport-SG')
-        $testUrl = [Uri]::EscapeDataString('https://www.gstatic.com/generate_204')
-        $result = Invoke-RestMethod -UseBasicParsing -Uri "$controller/proxies/$group/delay?url=$testUrl&timeout=7000" `
-            -Headers (Get-ControllerHeaders) -TimeoutSec 9
-        return [int]$result.delay
-    }
-    catch { return -1 }
-}
-
 function Get-ActiveUpstream {
     $state = Get-ProxyState 'FIRST-HOP'
     if ($state -and $state.now) { return [string]$state.now }
     return ''
 }
 
-function Get-BigAirportNode {
-    $state = Get-ProxyState 'BigAirport-SG'
-    if ($state -and $state.now) { return [string]$state.now }
-    return ''
-}
 
 try {
     $mode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
@@ -238,7 +188,7 @@ try {
     $upstreamChoice = if (Test-Path -LiteralPath $upstreamChoiceFile) {
         (Get-Content -LiteralPath $upstreamChoiceFile -Raw).Trim().ToLowerInvariant()
     } else { 'clash' }
-    if ($upstreamChoice -notin @('clash','wanda','bigairport')) { $upstreamChoice='clash' }
+    if ($upstreamChoice -notin @('clash','wanda')) { $upstreamChoice='clash' }
     $clashEndpoint = if (Test-Path -LiteralPath $clashEndpointFile) { (Get-Content -LiteralPath $clashEndpointFile -Raw).Trim() } else { '127.0.0.1:7980' }
     if ($upstreamChoice -eq 'clash' -and (Test-Path -LiteralPath $ensureClashScript)) {
         & powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $ensureClashScript -Endpoint $clashEndpoint | Out-Null
@@ -282,12 +232,11 @@ try {
         Set-FirstHop 'Wanda-Upstream' 'manual compatibility interface selection' | Out-Null
         Write-UpstreamHealth 'manual' 'Wanda-Upstream' '' -1 'manual compatibility interface selection'
     }
-    else {
-        $delay = Test-BigAirportDelay
-        if ($delay -lt 0) { Set-FailClosed 'Legacy BigAirport group is unavailable'; exit 3 }
-        Set-FirstHop 'BigAirport-SG' "legacy selection; delay=${delay}ms" | Out-Null
-        Write-UpstreamHealth 'manual' 'BigAirport-SG' '' $delay 'legacy compatibility selection'
-    }
+
+    Ensure-LandingRuntime
+    $landingChoice = Get-LandingChoice
+    if ($landingChoice -eq 'nas04') { Ensure-Nas04Socks }
+    Set-LandingGroup 'LANDING' (Get-LandingTarget $landingChoice)
 
     $ready = $false
     for ($i=0; $i -lt 4; $i++) {
@@ -320,19 +269,21 @@ try {
             Set-SystemProxy '127.0.0.1:18484'
         }
 
+        if (-not (Enter-LandingChange $changeMutex)) { continue }
+        try {
         if (([DateTime]::Now - $lastUpstreamHealth).TotalSeconds -ge 15) {
             $lastUpstreamHealth = [DateTime]::Now
             $selectedChoice = if (Test-Path -LiteralPath $upstreamChoiceFile) {
                 (Get-Content -LiteralPath $upstreamChoiceFile -Raw).Trim().ToLowerInvariant()
             } else { 'clash' }
-            $expected = if ($selectedChoice -eq 'clash') { 'Clash-Upstream' } elseif ($selectedChoice -eq 'wanda') { 'Wanda-Upstream' } else { 'BigAirport-SG' }
+            $expected = Get-UpstreamTarget $selectedChoice
             $active = Get-ActiveUpstream
             if ($active -ne $expected) { Set-FirstHop $expected 'restore manual interface selection' | Out-Null; $active=$expected }
             $available = if ($active -eq 'Clash-Upstream') {
                 [bool](Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $clashPort -State Listen -ErrorAction SilentlyContinue)
             } elseif ($active -eq 'Wanda-Upstream') {
                 [bool](Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 7892 -State Listen -ErrorAction SilentlyContinue)
-            } else { (Test-BigAirportDelay) -ge 0 }
+            } else { $false }
             $state = if ($available) { 'manual' } else { 'degraded' }
             Write-UpstreamHealth $state $active '' -1 'manual Clash-compatible interface selection'
         }
@@ -342,14 +293,18 @@ try {
             if (Test-GermanExit) {
                 Write-Health 'healthy' "mode=$currentMode; exit=$script:lastGermanExit; observed_proxy=$($settings.Server)"
             }
-            else { Set-FailClosed 'Germany exit health check failed' }
+            else { Set-FailClosed 'Selected landing exit health check failed' }
         }
+        } finally { $changeMutex.ReleaseMutex() }
     }
 }
 catch {
     Set-FailClosed "Supervisor exception: $($_.Exception.Message)"
 }
 finally {
+    if (Test-Path -LiteralPath $stopNas04Script) {
+        & powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $stopNas04Script | Out-Null
+    }
     try {
         $finalMode = if (Test-Path -LiteralPath $modeFile) { (Get-Content -LiteralPath $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
         if ($finalMode -ne 'apps') { Restore-BaseProxy 'landing supervisor exited' }
@@ -357,4 +312,5 @@ finally {
     catch { Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) FALLBACK-BASE failed=$($_.Exception.Message)" }
     $mutex.ReleaseMutex()
     $mutex.Dispose()
+    $changeMutex.Dispose()
 }
