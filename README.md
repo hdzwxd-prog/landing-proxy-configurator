@@ -22,10 +22,27 @@ NAS04 使用 Windows OpenSSH 动态 SOCKS：本地 `18583` 提供 SOCKS，`18584
 1. 自行启动 Clash/Wanda，并在客户端内选择订阅和节点。
 2. 打开桌面“落地代理配置器”，按实际端口填写接口并点击“应用接口”；使用 Wanda 时选第一跳来源并点击“应用第一跳”。
 3. 在“落地出口”中选择原德国或 NAS04，点击“应用落地”。运行时会检测实际公网 IP；失败则保留原选择。关闭模式只保存选择，启用后才连接。
-4. 推荐“仅 Claude/浏览器”：保持系统代理不变，使用桌面上的 Claude/Edge 落地启动器。Edge 使用独立用户目录，已有窗口不接管。其他应用（包括 Codex）继续使用原系统代理。
+4. 推荐“仅指定应用”：保持系统代理不变。点击“启动 Claude 客户端”或“启动落地浏览器”，也可使用桌面的同名快捷方式；此模式不会按进程名自动接管应用。普通浏览器仍走系统代理。Claude 桌面客户端与 Claude Code 命令行有不同的启动器。
 5. “刷新状态”和“检测出口”均进行真实出口检测并同步更新状态。成功结果只在同一链路内短期有效；失败、切换或过期不会继续显示旧的绿色成功结果。
 
 “仅非中国”和“全局”模式会将系统代理指向 18484，因而可能影响跟随系统代理的 Codex。“仅 Claude/浏览器”不会这么做。点 × 是收进托盘；“彻底退出”才停落地服务。独立应用中已经建立的连接是否重试/回落取决于客户端；本程序不保证所有程序在异常退出后都能无缝迁移已有连接。
+
+## Claude 桌面客户端与浏览器
+
+运行 `Install-App-Launchers.ps1` 部署应用启动器，运行 `Configure-Claude-Landing.ps1 -Action Enable` 为 Claude 配置其原生 `egressProxyUrl=http://127.0.0.1:18484`。使用 Claude 支持的用户级 `%LOCALAPPDATA%/Claude-3p/configLibrary` 配置；现场 MSIX 版本也从此处读取，与账号数据使用的虚拟化 Roaming 目录不同。保留已有配置项及备份，不修改账号、认证或部署模式。机器/用户管理策略优先时拒绝假装覆盖。需要 Claude 1.44121.1 或更新版本。
+
+- 配置只在 Claude **完整退出后重开**时生效。已有 Code/Cowork 任务不会被启动器强制结束。
+- 生效后普通 Claude 图标也会加载专用代理；落地停止时该客户端的代理请求失败，不自动回落。Clash/Wanda 和 Codex 不依赖本设置。
+- “核对 Claude 连接”检查一次当前 TCP 连接。发现 7980/7892/7890 或外部直连时报告异常；无连接时报未验证。有 18484 连接也只说明本次观测，不保证每个功能或后续请求。
+- Claude 更新器、外部浏览器登录、SSH 远端会话、忽略代理变量的工具有独立网络路径。代理配置不能替代系统防火墙；不宣称绝对防泄漏。
+- `Configure-Claude-Landing.ps1 -Action Restore` 只恢复本次修改的代理字段，完全退出并重开 Claude 后恢复原路线；不会自动执行。
+- `Start-Claude-Code-Landing.ps1` 才是命令行启动器，环境变量仅作用于该进程链，执行后恢复调用环境。
+- Edge 使用独立的 `LandingProxyEdgeProfile`，首次打开显示实际公网 IP。设置持久化的 `webrtc.ip_handling_policy=disable_non_proxied_udp`、拒绝定位权限，并关闭 QUIC。此机 Edge 的命令行 WebRTC 参数单独使用未通过对照测试，不能仅凭该参数宣称生效。
+- 落地浏览器启动时先检测所选出口；旧的未保护实例存在时要求关闭该实例后重开，不关闭普通 Edge。
+
+`node tests/test_browser_landing.mjs <report.json>` 在独立、未登录的临时 Edge 配置中验证落地 IP、WebRTC 和代理断开。WebRTC 使用本地 STUN 服务返回文档保留地址作为测试标记，不将用户真实 IP 发往外部 STUN 测试站。对照组应出现标记，保护组应无 UDP 包/候选地址；不可达代理应返回 `ERR_PROXY_CONNECTION_FAILED`。它不验证 Claude 桌面客户端的 WebRTC。
+
+参考：[Claude 原生代理及绕行边界](https://claude.com/docs/third-party/claude-desktop/network-proxy)、[配置来源与优先级](https://claude.com/docs/third-party/claude-desktop/mdm)。
 
 ## 源码、配置和升级
 

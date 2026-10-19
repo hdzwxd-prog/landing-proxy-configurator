@@ -90,6 +90,7 @@ namespace GermanyProxyManager
         private Label tunnelStatus;
         private Label routerStatus;
         private Label resultLabel;
+        private Label appConnectionLabel;
         private Button offButton;
         private Button foreignButton;
         private Button globalButton;
@@ -120,7 +121,7 @@ namespace GermanyProxyManager
         {
             Text = "落地代理配置器";
             AutoScaleMode = AutoScaleMode.None;
-            ClientSize = new Size(1100, 960);
+            ClientSize = new Size(1100, 1040);
             AutoScroll = true;
             MinimumSize = new Size(1100, 760);
             StartPosition = FormStartPosition.CenterScreen;
@@ -314,8 +315,8 @@ namespace GermanyProxyManager
                 new Point(560, 540)
             );
             appsButton = CreateModeButton(
-                "仅 Claude/浏览器",
-                "不改全局代理；\r\n用专用启动器走落地",
+                "仅指定应用",
+                "不自动接管应用\r\n请用下方启动按钮",
                 new Point(826, 540)
             );
             Controls.Add(offButton);
@@ -328,10 +329,47 @@ namespace GermanyProxyManager
             globalButton.Click += delegate { ApplyMode("global"); };
             appsButton.Click += delegate { ApplyMode("apps"); };
 
-            Panel testCard = CreateCard(new Point(28, 712), new Size(1044, 150));
+            Label appHint = new Label();
+            appHint.Text = "普通浏览器仍走系统代理；Claude 客户端需重开后加载专用设置。";
+            appHint.ForeColor = Orange;
+            appHint.AutoSize = true;
+            appHint.Location = new Point(32, 694);
+            Controls.Add(appHint);
+            string[] launchNames = { "启动 Claude 客户端", "启动落地浏览器", "核对 Claude 连接" };
+            string[] launchScripts = { "Start-Claude-Landing.ps1", "Start-Edge-Landing.ps1", "Test-Claude-Landing.ps1" };
+            for (int i = 0; i < launchNames.Length; i++)
+            {
+                Button action = new Button();
+                action.Text = launchNames[i];
+                action.Size = new Size(220, 40);
+                action.Location = new Point(32 + i * 240, 726);
+                StyleActionButton(action, Blue, Color.White);
+                string scriptName = launchScripts[i];
+                action.Click += async delegate {
+                    action.Enabled = false;
+                    try {
+                        await Task.Run(delegate { RunHiddenChecked("powershell.exe",
+                            "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + Path.Combine(RouterDir, scriptName) + "\""); });
+                        if (scriptName == "Test-Claude-Landing.ps1") {
+                            appConnectionLabel.Text = File.ReadAllText(Path.Combine(RouterDir, "claude-client-check.txt")).Trim() + "  [" + DateTime.Now.ToString("HH:mm:ss") + "]";
+                            appConnectionLabel.ForeColor = Orange;
+                        }
+                    } catch (Exception ex) { MessageBox.Show(ex.Message, "应用接入", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                    finally { action.Enabled = true; }
+                };
+                Controls.Add(action);
+            }
+            appConnectionLabel = new Label();
+            appConnectionLabel.Text = "Claude 客户端连接尚未核对。下方绿色出口仅表示落地服务正常。";
+            appConnectionLabel.ForeColor = Gray;
+            appConnectionLabel.Size = new Size(1020, 30);
+            appConnectionLabel.Location = new Point(32, 778);
+            Controls.Add(appConnectionLabel);
+
+            Panel testCard = CreateCard(new Point(28, 818), new Size(1044, 150));
             Controls.Add(testCard);
 
-            Label testTitle = CreateSectionTitle("出口检测", new Point(26, 17));
+            Label testTitle = CreateSectionTitle("落地服务出口检测（不代表应用已接入）", new Point(26, 17));
             testCard.Controls.Add(testTitle);
 
             resultLabel = new Label();
@@ -360,10 +398,10 @@ namespace GermanyProxyManager
             testCard.Controls.Add(reconnectButton);
 
             Label footer = new Label();
-            footer.Text = "点 × 会最小化到托盘并保持转发；托盘右键“彻底退出”才会停止服务并恢复网络。";
+            footer.Text = "× 收进托盘；彻底退出停止落地。Clash/Wanda 不受影响；固定落地的 Claude 将断网。";
             footer.ForeColor = Gray;
             footer.AutoSize = true;
-            footer.Location = new Point(32, 900);
+            footer.Location = new Point(32, 990);
             Controls.Add(footer);
         }
 
@@ -527,7 +565,7 @@ namespace GermanyProxyManager
                 {
                     RunCleanup();
                     resultLabel.ForeColor = Green;
-                    resultLabel.Text = "落地转发已关闭，后台服务已停止，网络已恢复。";
+                    resultLabel.Text = "落地服务已停止；上游保持运行，固定落地的 Claude 将断网。";
                 }
                 else
                 {
@@ -540,7 +578,7 @@ namespace GermanyProxyManager
                         RunStart();
                     resultLabel.ForeColor = Orange;
                     resultLabel.Text = mode == "apps"
-                        ? "正在启动仅应用模式；请使用桌面上的 Claude/浏览器落地启动器。"
+                        ? "只启用落地入口；请用“启动 Claude 客户端 / 启动落地浏览器”接入。"
                         : "正在通过所选上游验证落地出口……";
                 }
                 RefreshStatus();
@@ -929,7 +967,7 @@ namespace GermanyProxyManager
         {
             if (mode == "foreign") return "仅非中国走落地";
             if (mode == "global") return "全局走落地";
-            if (mode == "apps") return "仅 Claude/浏览器";
+            if (mode == "apps") return "仅指定应用（不自动接管）";
             return "关闭落地转发";
         }
 

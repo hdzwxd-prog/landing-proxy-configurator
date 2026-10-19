@@ -7,5 +7,6 @@ providers/
 
 # Legacy local integration artifacts
 Test-*
+!Test-Claude-Landing.ps1
 Update-Germany-Upstreams.ps1
 ui-check.png
