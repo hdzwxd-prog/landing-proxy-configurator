@@ -105,7 +105,7 @@ function Restart-CodexNetworkService {
 }
 
 function Set-FailClosed([string]$reason) {
-    Set-SystemProxy '127.0.0.1:18484'
+    if ($mode -ne 'apps') { Set-SystemProxy '127.0.0.1:18484' }
     Write-Health 'degraded' "$reason; fail_closed=127.0.0.1:18484"
     Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) FAIL-CLOSED $reason; kept=127.0.0.1:18484"
 }
@@ -191,7 +191,7 @@ function Get-BigAirportNode {
 
 try {
     $mode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
-    if ($mode -notin @('foreign','global')) { exit 0 }
+    if ($mode -notin @('foreign','global','apps')) { exit 0 }
 
     $upstreamChoice = if (Test-Path -LiteralPath $upstreamChoiceFile) {
         (Get-Content -LiteralPath $upstreamChoiceFile -Raw).Trim().ToLowerInvariant()
@@ -202,7 +202,8 @@ try {
         & powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $ensureClashScript -Endpoint $clashEndpoint | Out-Null
     }
 
-    $config = Join-Path $routerDir "config-$mode.yaml"
+    $configMode = if ($mode -eq 'apps') { 'foreign' } else { $mode }
+    $config = Join-Path $routerDir "config-$configMode.yaml"
     Write-Health 'starting' "mode=$mode"
     Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) starting mode=$mode"
     $existing = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 18484 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -257,7 +258,7 @@ try {
         if ($routerProcess.HasExited) { exit 3 }
     }
     else {
-        Set-SystemProxy '127.0.0.1:18484'
+        if ($mode -ne 'apps') { Set-SystemProxy '127.0.0.1:18484' }
         Write-Health 'healthy' "mode=$mode; exit=$script:lastGermanExit"
         Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) active mode=$mode exit=$script:lastGermanExit"
         # Existing applications keep their sessions; the manager never restarts Codex or Edge.
@@ -272,7 +273,7 @@ try {
         if ($routerProcess.HasExited) { Set-FailClosed 'Router process exited unexpectedly'; break }
 
         $settings = Get-SystemProxyFresh
-        if ($settings.Enabled -ne 1 -or $settings.Server -ne '127.0.0.1:18484') {
+        if ($currentMode -ne 'apps' -and ($settings.Enabled -ne 1 -or $settings.Server -ne '127.0.0.1:18484')) {
             Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) restoring active proxy from $($settings.Server) to 127.0.0.1:18484"
             Set-SystemProxy '127.0.0.1:18484'
         }

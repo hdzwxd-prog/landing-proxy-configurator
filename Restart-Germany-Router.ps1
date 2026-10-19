@@ -37,4 +37,4 @@ Start-Sleep -Milliseconds 500
 Get-RouterProcesses |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Milliseconds 500
-Start-ScheduledTask -TaskName 'Germany Rule Router 18484'
+Start-Process powershell.exe -ArgumentList @('-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',(Join-Path $env:USERPROFILE '.ssh\Start-Germany-Router.ps1')) -WindowStyle Hidden

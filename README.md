@@ -8,6 +8,8 @@ Windows 桌面托盘程序，用于把本机系统代理固定到独立的 Mihom
 2. 打开“落地代理配置器”，在“Clash 接口”填写 Clash 提供的本地 HTTP/SOCKS 混合接口，例如 `127.0.0.1:7980`。
 3. 点击“应用接口”，选择“仅非中国走德国”或“全局走德国”，再用“出口检测”确认公网 IP。
 4. 订阅 URL、订阅名称和节点名称都不写入本程序；程序只消费 Clash 的本地代理接口。
+5. 选择“仅 Claude/浏览器”时，程序只启动 18484，不改 Windows 全局代理；使用桌面上的 `Claude-落地代理.ps1` 或 `Edge-落地代理.ps1` 启动对应应用。Edge 使用独立的 `LandingProxyEdgeProfile`，现有 Edge 窗口不会被接管。
+6. 选择“关闭德国转发”或退出程序后，18484 停止；Clash Verge/WandaCloud 自己的进程和端口不由本程序停止。
 
 程序保留 `Wanda-Upstream` 作为兼容接口，但不再把 BigAirport 或任何单一订阅当作产品逻辑。选择文件和配置位于 `%USERPROFILE%\.ssh\GermanyRouter`，源代码和脚本在本目录。
 

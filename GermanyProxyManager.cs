@@ -69,6 +69,7 @@ namespace GermanyProxyManager
         private const string RouterTask = "Germany Rule Router 18484";
         private const string CleanupScript = @"C:\Users\250010031\.ssh\Stop-Germany-Proxy.ps1";
         private const string RestartScript = @"C:\Users\250010031\.ssh\Restart-Germany-Router.ps1";
+        private const string StartScript = @"C:\Users\250010031\.ssh\Start-Germany-Router.ps1";
         private const string UpstreamScript = @"C:\Users\250010031\.ssh\GermanyRouter\Set-Germany-Upstream.ps1";
         private const string InternetSettings = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
 
@@ -89,6 +90,7 @@ namespace GermanyProxyManager
         private Button offButton;
         private Button foreignButton;
         private Button globalButton;
+        private Button appsButton;
         private Button testButton;
         private Button reconnectButton;
         private TextBox clashEndpointBox;
@@ -227,20 +229,27 @@ namespace GermanyProxyManager
             foreignButton = CreateModeButton(
                 "仅非中国走德国",
                 "中国域名/IP 直接访问\r\n其余流量走德国",
-                new Point(385, 488)
+                new Point(294, 488)
             );
             globalButton = CreateModeButton(
                 "全局走德国",
                 "本机/局域网保持直连\r\n所有公共流量走德国",
-                new Point(742, 488)
+                new Point(560, 488)
+            );
+            appsButton = CreateModeButton(
+                "仅 Claude/浏览器",
+                "不改全局代理；\r\n用专用启动器走德国",
+                new Point(826, 488)
             );
             Controls.Add(offButton);
             Controls.Add(foreignButton);
             Controls.Add(globalButton);
+            Controls.Add(appsButton);
 
             offButton.Click += delegate { ApplyMode("off"); };
             foreignButton.Click += delegate { ApplyMode("foreign"); };
             globalButton.Click += delegate { ApplyMode("global"); };
+            appsButton.Click += delegate { ApplyMode("apps"); };
 
             Panel testCard = CreateCard(new Point(28, 660), new Size(1044, 150));
             Controls.Add(testCard);
@@ -395,7 +404,7 @@ namespace GermanyProxyManager
             button.TextAlign = ContentAlignment.MiddleLeft;
             button.Padding = new Padding(20, 14, 14, 14);
             button.Location = location;
-            button.Size = new Size(330, 142);
+            button.Size = new Size(250, 142);
             button.FlatStyle = FlatStyle.Flat;
             button.FlatAppearance.BorderSize = 1;
             button.FlatAppearance.BorderColor = Color.FromArgb(205, 214, 224);
@@ -422,7 +431,7 @@ namespace GermanyProxyManager
             try
             {
                 string mode = File.ReadAllText(ModeFile).Trim().ToLowerInvariant();
-                if (mode == "off" || mode == "foreign" || mode == "global")
+                if (mode == "off" || mode == "foreign" || mode == "global" || mode == "apps")
                     return mode;
             }
             catch { }
@@ -446,12 +455,14 @@ namespace GermanyProxyManager
                 else
                 {
                     File.WriteAllText(ModeFile, mode);
-                    if (previousMode == "foreign" || previousMode == "global")
+                    if (previousMode == "foreign" || previousMode == "global" || previousMode == "apps")
                         RunRestart();
                     else
-                        RunTask(RouterTask);
+                        RunStart();
                     resultLabel.ForeColor = Orange;
-                    resultLabel.Text = "正在通过 Clash 接口验证德国出口；异常时保持 18484，防止出口泄露。";
+                    resultLabel.Text = mode == "apps"
+                        ? "正在启动仅应用模式；请使用桌面上的 Claude/浏览器落地启动器。"
+                        : "正在通过 Clash 接口验证德国出口；异常时保持 18484，防止出口泄露。";
                 }
                 RefreshStatus();
             }
@@ -614,7 +625,7 @@ namespace GermanyProxyManager
                 SetSystemProxy("127.0.0.1:7892");
                 proxy = "127.0.0.1:7892";
             }
-            else if (mode != "off" && port18484 && IsRouteHealthy() && proxy != "127.0.0.1:18484")
+            else if (mode != "off" && mode != "apps" && port18484 && IsRouteHealthy() && proxy != "127.0.0.1:18484")
             {
                 SetSystemProxy("127.0.0.1:18484");
                 proxy = "127.0.0.1:18484";
@@ -624,6 +635,7 @@ namespace GermanyProxyManager
             HighlightMode(offButton, mode == "off");
             HighlightMode(foreignButton, mode == "foreign");
             HighlightMode(globalButton, mode == "global");
+            HighlightMode(appsButton, mode == "apps");
             if (clashEndpointBox != null && !clashEndpointBox.Focused) clashEndpointBox.Text = ReadClashEndpoint();
         }
 
@@ -777,6 +789,7 @@ namespace GermanyProxyManager
         {
             if (mode == "foreign") return "仅非中国走德国";
             if (mode == "global") return "全局走德国";
+            if (mode == "apps") return "仅 Claude/浏览器";
             return "关闭德国转发";
         }
 
@@ -857,6 +870,11 @@ namespace GermanyProxyManager
         private static void RunTask(string taskName)
         {
             RunHidden("schtasks.exe", "/Run /TN \"" + taskName + "\"");
+        }
+
+        private static void RunStart()
+        {
+            RunHidden("powershell.exe", "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + StartScript + "\"");
         }
 
         private static void EndTask(string taskName)
