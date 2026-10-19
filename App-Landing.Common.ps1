@@ -12,16 +12,3 @@ function Set-AppLandingEnvironment {
     }
     $env:NO_PROXY = 'localhost,127.0.0.1,::1,.local'
 }
-function Set-EdgeLandingPrivacy([string]$profile) {
-    $default=Join-Path $profile 'Default'
-    New-Item -ItemType Directory -Path $default -Force | Out-Null
-    $path=Join-Path $default 'Preferences'
-    $prefs=if(Test-Path $path){Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json}else{[pscustomobject]@{}}
-    if(-not $prefs.webrtc){$prefs|Add-Member NoteProperty webrtc ([pscustomobject]@{}) -Force}
-    $prefs.webrtc | Add-Member NoteProperty ip_handling_policy 'disable_non_proxied_udp' -Force
-    if(-not $prefs.profile){$prefs|Add-Member NoteProperty profile ([pscustomobject]@{}) -Force}
-    if(-not $prefs.profile.default_content_setting_values){$prefs.profile|Add-Member NoteProperty default_content_setting_values ([pscustomobject]@{}) -Force}
-    $prefs.profile.default_content_setting_values | Add-Member NoteProperty geolocation 2 -Force
-    if(Test-Path $path){Copy-Item -LiteralPath $path -Destination ($path+'.bak-'+(Get-Date -Format 'yyyyMMdd-HHmmssfff'))}
-    [IO.File]::WriteAllText($path,($prefs|ConvertTo-Json -Depth 100),[Text.UTF8Encoding]::new($false))
-}

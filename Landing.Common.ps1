@@ -75,11 +75,18 @@ function Write-LandingHealth([string]$choice, [string]$state, [string]$detail) {
     )
 }
 
+function Get-LandingConfigMode([ValidateSet('foreign','global','apps')][string]$mode) {
+    # App-scoped traffic must not inherit the China-direct rules. Scope comes
+    # from each app's explicit proxy, not from relaxing public-site routing.
+    if ($mode -eq 'foreign') { return 'foreign' }
+    return 'global'
+}
+
 function Update-LandingRuntime {
     $first = (Invoke-LandingApi '/proxies/FIRST-HOP').now
     $landing = Get-LandingChoice
     $mode = (Get-Content (Join-Path $routerDir 'mode.txt') -Raw).Trim()
-    $configMode = if ($mode -eq 'global') { 'global' } else { 'foreign' }
+    $configMode = Get-LandingConfigMode $mode
     Invoke-LandingApi '/configs?force=true' 'PUT' @{path=(Join-Path $routerDir "config-$configMode.yaml")} | Out-Null
     Set-LandingGroup 'FIRST-HOP' $first
     Set-LandingGroup 'LANDING' (Get-LandingTarget $landing)

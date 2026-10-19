@@ -194,7 +194,7 @@ try {
         & powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $ensureClashScript -Endpoint $clashEndpoint | Out-Null
     }
 
-    $configMode = if ($mode -eq 'apps') { 'foreign' } else { $mode }
+    $configMode = Get-LandingConfigMode $mode
     $config = Join-Path $routerDir "config-$configMode.yaml"
     Write-Health 'starting' "mode=$mode"
     Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) starting mode=$mode"

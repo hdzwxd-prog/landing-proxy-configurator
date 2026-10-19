@@ -7,6 +7,7 @@ import dgram from 'node:dgram';
 import assert from 'node:assert/strict';
 const edge = path.join(process.env['ProgramFiles(x86)'], 'Microsoft/Edge/Application/msedge.exe');
 const reportPath = process.argv[2];
+const policyMode = process.argv.includes('--policy');
 const delay = ms => new Promise(r=>setTimeout(r,ms));
 let udpPackets=0;
 const stun=dgram.createSocket('udp4');
@@ -24,14 +25,16 @@ await new Promise(r=>stun.bind(0,'127.0.0.1',r));
 const stunPort=stun.address().port;
 async function run(hardened,proxyPort) {
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'landing-browser-test-'));
-  if(hardened) {
+  if(hardened && !policyMode) {
     await fs.mkdir(path.join(dir,'Default'));
     await fs.writeFile(path.join(dir,'Default','Preferences'),JSON.stringify({webrtc:{ip_handling_policy:'disable_non_proxied_udp'}}));
   }
   const args=['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking',
-    '--remote-debugging-port=0',`--user-data-dir=${dir}`,`--proxy-server=http://127.0.0.1:${proxyPort}`,
-    '--proxy-bypass-list=<-loopback>','--disable-quic','about:blank'];
-  if(hardened)args.push('--force-webrtc-ip-handling-policy=disable_non_proxied_udp');
+    '--remote-debugging-port=0',`--user-data-dir=${dir}`,'about:blank'];
+  if(!policyMode) {
+    args.push(`--proxy-server=http://127.0.0.1:${proxyPort}`,'--proxy-bypass-list=<-loopback>','--disable-quic');
+    if(hardened)args.push('--force-webrtc-ip-handling-policy=disable_non_proxied_udp');
+  }
   const proc=spawn(edge,args,{windowsHide:true,stdio:'ignore'});
   let ws;let id=0;const waiting=new Map();
   function call(method,params={}) {
@@ -62,7 +65,7 @@ async function run(hardened,proxyPort) {
       await pc.setLocalDescription(await pc.createOffer());
       setTimeout(()=>{pc.close();resolve(candidates)},3500);
     })`,awaitPromise:true,returnByValue:true})).result.value;
-    return {hardened,proxyPort,ip,networkError:nav.errorText??null,stunPackets:udpPackets-before,candidates:rtc};
+    return {configuration:policyMode?'Windows Edge policy only':'isolated profile and command line',hardened,proxyPort:policyMode?null:proxyPort,ip,networkError:nav.errorText??null,stunPackets:udpPackets-before,candidates:rtc};
   } finally {
     if(ws) {try{await call('Browser.close')}catch{}ws.close()}
     for(let i=0;i<30&&proc.exitCode===null;i++)await delay(100);
@@ -75,14 +78,14 @@ async function run(hardened,proxyPort) {
 }
 const report={};
 try {
-  report.control=await run(false,18484);
+  if(!policyMode)report.control=await run(false,18484);
   report.protected=await run(true,18484);
-  report.unreachable=await run(true,9);
-  assert(report.control.stunPackets>0,'Local STUN control did not run');
+  if(!policyMode)report.unreachable=await run(true,9);
+  if(!policyMode)assert(report.control.stunPackets>0,'Local STUN control did not run');
   assert(report.protected.stunPackets===0,'WebRTC bypassed proxy');
   assert(report.protected.candidates.length===0,'WebRTC exposed a candidate');
   assert(['212.121.132.230','192.248.188.234'].includes(report.protected.ip),'Unexpected landing exit');
-  assert(report.unreachable.networkError==='net::ERR_PROXY_CONNECTION_FAILED','Browser fell back or negative check inconclusive');
+  if(!policyMode)assert(report.unreachable.networkError==='net::ERR_PROXY_CONNECTION_FAILED','Browser fell back or negative check inconclusive');
   report.passed=true;
 } finally {
   stun.close();

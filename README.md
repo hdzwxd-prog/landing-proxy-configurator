@@ -22,10 +22,12 @@ NAS04 使用 Windows OpenSSH 动态 SOCKS：本地 `18583` 提供 SOCKS，`18584
 1. 自行启动 Clash/Wanda，并在客户端内选择订阅和节点。
 2. 打开桌面“落地代理配置器”，按实际端口填写接口并点击“应用接口”；使用 Wanda 时选第一跳来源并点击“应用第一跳”。
 3. 在“落地出口”中选择原德国或 NAS04，点击“应用落地”。运行时会检测实际公网 IP；失败则保留原选择。关闭模式只保存选择，启用后才连接。
-4. 推荐“仅指定应用”：保持系统代理不变。点击“启动 Claude 客户端”或“启动落地浏览器”，也可使用桌面的同名快捷方式；此模式不会按进程名自动接管应用。普通浏览器仍走系统代理。Claude 桌面客户端与 Claude Code 命令行有不同的启动器。
+4. 推荐“仅指定应用”：保持系统代理不变。Claude 使用原生应用代理配置。勾选 **“Edge 使用落地代理（含默认链接）”**，日常 Edge 的普通窗口、默认浏览器链接及邮件登录跳转统一使用落地；保留原来的账号、书签和历史，不另建专用浏览器。首次应用时按 Windows 提示授权，保存网页工作后完整退出并重开 Edge，再点击“检查 Edge 出口”。
 5. “刷新状态”和“检测出口”均进行真实出口检测并同步更新状态。成功结果只在同一链路内短期有效；失败、切换或过期不会继续显示旧的绿色成功结果。
 
-“仅非中国”和“全局”模式会将系统代理指向 18484，因而可能影响跟随系统代理的 Codex。“仅 Claude/浏览器”不会这么做。点 × 是收进托盘；“彻底退出”才停落地服务。独立应用中已经建立的连接是否重试/回落取决于客户端；本程序不保证所有程序在异常退出后都能无缝迁移已有连接。
+“仅非中国”和“全局”模式会将系统代理指向 18484，因而可能影响跟随系统代理的 Codex。“仅指定应用”不会这么做。点 × 是收进托盘；“彻底退出”才停落地服务。固定落地的 Claude/Edge 在落地停止时连接失败；要让 Edge 恢复原路线，取消 Edge 开关。切换代理不保证已有连接无缝迁移。
+
+“仅指定应用”下，接入 18484 的公共网站流量统一走所选落地，不继承“仅非中国”模式的国内直连规则。本机、局域网及 `slai.edu.cn` 校内服务保留直连例外。
 
 ## Claude 桌面客户端与浏览器
 
@@ -37,12 +39,17 @@ NAS04 使用 Windows OpenSSH 动态 SOCKS：本地 `18583` 提供 SOCKS，`18584
 - Claude 更新器、外部浏览器登录、SSH 远端会话、忽略代理变量的工具有独立网络路径。代理配置不能替代系统防火墙；不宣称绝对防泄漏。
 - `Configure-Claude-Landing.ps1 -Action Restore` 只恢复本次修改的代理字段，完全退出并重开 Claude 后恢复原路线；不会自动执行。
 - `Start-Claude-Code-Landing.ps1` 才是命令行启动器，环境变量仅作用于该进程链，执行后恢复调用环境。
-- Edge 使用独立的 `LandingProxyEdgeProfile`，首次打开显示实际公网 IP。设置持久化的 `webrtc.ip_handling_policy=disable_non_proxied_udp`、拒绝定位权限，并关闭 QUIC。此机 Edge 的命令行 WebRTC 参数单独使用未通过对照测试，不能仅凭该参数宣称生效。
-- 落地浏览器启动时先检测所选出口；旧的未保护实例存在时要求关闭该实例后重开，不关闭普通 Edge。
+- Edge 使用当前 Windows 用户的 `Software\Policies\Microsoft\Edge` 策略，`ProxySettings` 固定为 `127.0.0.1:18484`，同时限制 WebRTC 非代理 UDP、关闭 QUIC、默认拒绝定位。代理策略支持动态刷新，QUIC / WebRTC 策略要求重开浏览器。微软说明 WebRTC 策略不适用于登录个人 Microsoft 账号的配置；不能将策略写入等同于所有账号场景都已验证，也不能据此承诺绝对匿名。
+- `Configure-Edge-Landing.ps1 -Action Enable -AllowElevation` 启用，`-Action Restore -AllowElevation` 恢复原值或原来的缺省状态。首次备份在 `.ssh\GermanyRouter\edge-policy-state.json`；仅恢复本程序拥有的四项策略，发现其他程序的后续修改时拒绝覆盖。若检测到计算机级管理策略则拒绝假装覆盖。此机策略目录只允许管理员写入，因此切换时会请求 Windows 授权。
+- 安装器移除旧的专用 Edge 桌面入口并保存到运行目录的 `retired-edge-launchers`；不再启动 `LandingProxyEdgeProfile`，也不删除其中可能已有的用户数据。“检查 Edge 出口”只打开日常 Edge。
 
-`node tests/test_browser_landing.mjs <report.json>` 在独立、未登录的临时 Edge 配置中验证落地 IP、WebRTC 和代理断开。WebRTC 使用本地 STUN 服务返回文档保留地址作为测试标记，不将用户真实 IP 发往外部 STUN 测试站。对照组应出现标记，保护组应无 UDP 包/候选地址；不可达代理应返回 `ERR_PROXY_CONNECTION_FAILED`。它不验证 Claude 桌面客户端的 WebRTC。
+未启用 Edge 用户策略时，`node tests/test_browser_landing.mjs <report.json>` 在独立、未登录的临时 Edge 配置中验证落地 IP、WebRTC 和代理断开。WebRTC 使用本地 STUN 服务返回文档保留地址作为测试标记，不将用户真实 IP 发往外部 STUN 测试站。对照组应出现标记，保护组应无 UDP 包/候选地址；不可达代理应返回 `ERR_PROXY_CONNECTION_FAILED`。它不验证 Claude 桌面客户端的 WebRTC。
 
-参考：[Claude 原生代理及绕行边界](https://claude.com/docs/third-party/claude-desktop/network-proxy)、[配置来源与优先级](https://claude.com/docs/third-party/claude-desktop/mdm)。
+启用当前用户的 Edge 策略后，改用 `node tests/test_browser_landing.mjs <report.json> --policy`：不设置命令行代理或 WebRTC 偏好，检查新启动的 Edge 仅依赖 Windows 策略时的实际出口和本地 STUN 行为。此时不运行不可达代理对照，因为 Edge 策略会覆盖测试命令行的代理端口；不为测试而切断生产落地。临时配置仅用于自动测试，不是交付给用户的专用浏览器。
+
+`powershell -File tests/test_edge_policy.ps1` 在独立临时注册表项中验证启用、重复启用、恢复原值/类型、保留无关设置和外部修改冲突保护，不修改真实 Edge 策略。
+
+参考：[Claude 原生代理及绕行边界](https://claude.com/docs/third-party/claude-desktop/network-proxy)、[配置来源与优先级](https://claude.com/docs/third-party/claude-desktop/mdm)、[Edge 代理策略](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/ProxySettings)、[WebRTC 策略适用范围](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/WebRtcLocalhostIpHandling)。
 
 ## 源码、配置和升级
 

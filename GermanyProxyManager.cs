@@ -91,6 +91,9 @@ namespace GermanyProxyManager
         private Label routerStatus;
         private Label resultLabel;
         private Label appConnectionLabel;
+        private CheckBox edgeLandingCheck;
+        private Label edgePolicyLabel;
+        private bool edgePolicyBusy;
         private Button offButton;
         private Button foreignButton;
         private Button globalButton;
@@ -316,7 +319,7 @@ namespace GermanyProxyManager
             );
             appsButton = CreateModeButton(
                 "仅指定应用",
-                "不自动接管应用\r\n请用下方启动按钮",
+                "系统代理不变\r\n单独配置应用",
                 new Point(826, 540)
             );
             Controls.Add(offButton);
@@ -329,14 +332,21 @@ namespace GermanyProxyManager
             globalButton.Click += delegate { ApplyMode("global"); };
             appsButton.Click += delegate { ApplyMode("apps"); };
 
-            Label appHint = new Label();
-            appHint.Text = "普通浏览器仍走系统代理；Claude 客户端需重开后加载专用设置。";
-            appHint.ForeColor = Orange;
-            appHint.AutoSize = true;
-            appHint.Location = new Point(32, 694);
-            Controls.Add(appHint);
-            string[] launchNames = { "启动 Claude 客户端", "启动落地浏览器", "核对 Claude 连接" };
-            string[] launchScripts = { "Start-Claude-Landing.ps1", "Start-Edge-Landing.ps1", "Test-Claude-Landing.ps1" };
+            edgeLandingCheck = new CheckBox();
+            edgeLandingCheck.Text = "Edge 使用落地代理（含默认链接）";
+            edgeLandingCheck.AutoCheck = false;
+            edgeLandingCheck.Size = new Size(390, 32);
+            edgeLandingCheck.Location = new Point(32, 690);
+            edgeLandingCheck.Click += async delegate { await SetEdgePolicyAsync(!edgeLandingCheck.Checked); };
+            Controls.Add(edgeLandingCheck);
+            edgePolicyLabel = new Label();
+            edgePolicyLabel.Size = new Size(640, 32);
+            edgePolicyLabel.Location = new Point(428, 694);
+            edgePolicyLabel.ForeColor = Gray;
+            Controls.Add(edgePolicyLabel);
+            RefreshEdgePolicy();
+            string[] launchNames = { "启动 Claude 客户端", "核对 Claude 连接" };
+            string[] launchScripts = { "Start-Claude-Landing.ps1", "Test-Claude-Landing.ps1" };
             for (int i = 0; i < launchNames.Length; i++)
             {
                 Button action = new Button();
@@ -359,6 +369,16 @@ namespace GermanyProxyManager
                 };
                 Controls.Add(action);
             }
+            Button edgeTest = new Button();
+            edgeTest.Text = "检查 Edge 出口";
+            edgeTest.Size = new Size(220, 40);
+            edgeTest.Location = new Point(512, 726);
+            StyleActionButton(edgeTest, Color.White, Navy);
+            edgeTest.Click += delegate {
+                try { Process.Start("microsoft-edge:https://api.ipify.org"); }
+                catch (Exception ex) { MessageBox.Show(ex.Message, "Edge 出口检测"); }
+            };
+            Controls.Add(edgeTest);
             appConnectionLabel = new Label();
             appConnectionLabel.Text = "Claude 客户端连接尚未核对。下方绿色出口仅表示落地服务正常。";
             appConnectionLabel.ForeColor = Gray;
@@ -398,11 +418,42 @@ namespace GermanyProxyManager
             testCard.Controls.Add(reconnectButton);
 
             Label footer = new Label();
-            footer.Text = "× 收进托盘；彻底退出停止落地。Clash/Wanda 不受影响；固定落地的 Claude 将断网。";
+            footer.Text = "× 收进托盘；退出停止落地。Clash/Wanda 不受影响；Edge 取消勾选可恢复原代理。";
             footer.ForeColor = Gray;
             footer.AutoSize = true;
             footer.Location = new Point(32, 990);
             Controls.Add(footer);
+        }
+
+        private void RefreshEdgePolicy()
+        {
+            if (edgePolicyBusy || edgeLandingCheck == null) return;
+            try {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Policies\Microsoft\Edge")) {
+                    string value = key == null ? "" : Convert.ToString(key.GetValue("ProxySettings", ""));
+                    edgeLandingCheck.Checked = value == "{\"ProxyMode\":\"fixed_servers\",\"ProxyServer\":\"http://127.0.0.1:18484\",\"ProxyBypassList\":\"<-loopback>\"}";
+                    edgePolicyLabel.Text = edgeLandingCheck.Checked
+                        ? "已配置；首次需重开 Edge，再检查出口"
+                        : "未启用；沿用 Edge 原代理设置";
+                    edgePolicyLabel.ForeColor = Gray;
+                }
+            } catch { edgePolicyLabel.Text = "无法读取 Edge 设置"; edgePolicyLabel.ForeColor = Orange; }
+        }
+
+        private async Task SetEdgePolicyAsync(bool enable)
+        {
+            edgePolicyBusy = true;
+            edgeLandingCheck.Enabled = false;
+            edgePolicyLabel.Text = "正在应用；如 Windows 提示，请完成管理员授权…";
+            try {
+                await Task.Run(delegate { RunHiddenChecked("powershell.exe",
+                    "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + Path.Combine(RouterDir, "Configure-Edge-Landing.ps1") + "\" -Action " + (enable ? "Enable" : "Restore") + " -AllowElevation", 150000); });
+                MessageBox.Show(enable
+                    ? "已为日常 Edge 配置落地代理，包括默认浏览器打开的链接。\n请保存网页工作，完整退出并重开 Edge，然后点击“检查 Edge 出口”。\n落地服务停止时，Edge 会断网；取消勾选可恢复原代理。"
+                    : "已恢复 Edge 原来的代理及隐私策略。请完整退出并重开 Edge。",
+                    "Edge 设置", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            } catch (Exception ex) { MessageBox.Show(ex.Message, "Edge 设置未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            finally { edgePolicyBusy = false; edgeLandingCheck.Enabled = true; RefreshEdgePolicy(); }
         }
 
         private void BuildTray()
@@ -578,7 +629,7 @@ namespace GermanyProxyManager
                         RunStart();
                     resultLabel.ForeColor = Orange;
                     resultLabel.Text = mode == "apps"
-                        ? "只启用落地入口；请用“启动 Claude 客户端 / 启动落地浏览器”接入。"
+                        ? "系统代理保持不变；Claude 使用独立设置，Edge 可用下方开关接入。"
                         : "正在通过所选上游验证落地出口……";
                 }
                 RefreshStatus();
@@ -788,6 +839,7 @@ namespace GermanyProxyManager
 
         private void RefreshStatus()
         {
+            RefreshEdgePolicy();
             string mode = ReadMode();
             string upstreamChoice = ReadUpstreamChoice();
             bool upstreamListening = upstreamChoice == "wanda"
@@ -1105,7 +1157,7 @@ namespace GermanyProxyManager
             process.WaitForExit(5000);
         }
 
-        private static void RunHiddenChecked(string file, string arguments)
+        private static void RunHiddenChecked(string file, string arguments, int timeoutMs = 90000)
         {
             ProcessStartInfo info = new ProcessStartInfo();
             info.FileName = file;
@@ -1115,7 +1167,7 @@ namespace GermanyProxyManager
             info.RedirectStandardError = true;
             Process process = Process.Start(info);
             Task<string> errorRead = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(90000))
+            if (!process.WaitForExit(timeoutMs))
                 throw new InvalidOperationException("操作超时");
             if (process.ExitCode != 0)
                 throw new InvalidOperationException("应用失败：" + errorRead.Result.Trim());
