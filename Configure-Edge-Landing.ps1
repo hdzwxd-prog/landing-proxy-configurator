@@ -1,6 +1,7 @@
 ﻿param(
     [ValidateSet('Enable','Restore','Status')][string]$Action='Status',
     [switch]$AllowElevation,
+    [switch]$RepairMissingProxy,
     [string]$OwnerSid,
     [string]$ErrorFile
 )
@@ -18,7 +19,9 @@ try {
     }
     if($Action -eq 'Enable') {
         . (Join-Path $PSScriptRoot 'App-Landing.Common.ps1')
-        Assert-AppLandingReady
+        # Restoring an explicitly requested fixed proxy must also be possible
+        # during an outage: fail closed instead of inheriting the system route.
+        if(-not $RepairMissingProxy){Assert-AppLandingReady}
         $machine=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($regPath)
         try {
             if($machine -and @($machine.GetValueNames() | Where-Object {$_ -in @('ProxySettings','ProxyMode','ProxyServer','ProxyPacUrl','ProxyBypassList','WebRtcLocalhostIpHandling','QuicAllowed','DefaultGeolocationSetting')}).Count){throw '检测到计算机级 Edge 管理策略；未覆盖，请先由管理员确认现有策略。'}
@@ -31,6 +34,7 @@ try {
         if(-not $AllowElevation -or -not $denied){throw}
         $errorPath=Join-Path $env:TEMP ('landing-edge-'+[guid]::NewGuid().ToString('N')+'.txt')
         $arguments='-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$PSCommandPath+'" -Action '+$Action+' -OwnerSid "'+$currentSid+'" -ErrorFile "'+$errorPath+'"'
+        if($RepairMissingProxy){$arguments+=' -RepairMissingProxy'}
         $child=Start-Process -FilePath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden -PassThru
         if(-not $child.WaitForExit(120000)){throw '管理员授权仍未完成。请完成系统提示后刷新配置器。'}
         if($child.ExitCode -ne 0){
@@ -45,7 +49,7 @@ try {
     try {
         try {$locked=$mutex.WaitOne(1000)}catch [Threading.AbandonedMutexException]{$locked=$true}
         if(-not $locked){throw '另一个 Edge 设置操作尚未结束，请稍后再试。'}
-        Set-EdgeLandingPolicy -Action $Action -Key $key -StatePath $statePath
+        Set-EdgeLandingPolicy -Action $Action -Key $key -StatePath $statePath -RepairMissingProxy:$RepairMissingProxy
     }finally{if($locked){$mutex.ReleaseMutex()};$mutex.Dispose();$key.Close()}
     Write-Output 'Edge 策略已写入。请在保存网页工作后完整退出并重开 Edge；代理刷新和隐私策略生效时间不同。'
 } catch {

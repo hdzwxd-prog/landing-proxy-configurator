@@ -858,6 +858,11 @@ namespace GermanyProxyManager
                 trayIcon.Text = "德国代理切换器 - " + ModeDisplay(mode);
             string proxy = GetSystemProxy();
             systemProxyValue.Text = "系统代理：" + (string.IsNullOrEmpty(proxy) ? "未启用" : proxy);
+            systemProxyValue.ForeColor = Gray;
+            if (mode == "apps" && proxy.Contains(":18484")) {
+                systemProxyValue.Text = "冲突：系统也走落地，影响其他应用";
+                systemProxyValue.ForeColor = Red;
+            }
 
             HighlightMode(offButton, mode == "off");
             HighlightMode(foreignButton, mode == "foreign");
@@ -994,6 +999,13 @@ namespace GermanyProxyManager
             }
             tunnelStatus.Text = label + "  " + state;
             tunnelStatus.ForeColor = color;
+            if (mode != "off") {
+                FileInfo heartbeat = new FileInfo(Path.Combine(RouterDir, "supervisor-heartbeat.txt"));
+                if (!heartbeat.Exists || (DateTime.Now - heartbeat.LastWriteTime).TotalSeconds > 90) {
+                    tunnelStatus.Text = label + "  监督已停止/失联，请重新连接";
+                    tunnelStatus.ForeColor = Orange;
+                }
+            }
         }
 
         private static bool IsRouteHealthy()

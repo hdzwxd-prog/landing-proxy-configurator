@@ -15,6 +15,13 @@ try {
     Set-EdgeLandingPolicy Enable $key $statePath
     Assert ($first -eq (Get-Content $statePath -Raw -Encoding UTF8)) 'Idempotent enable overwrote backup'
     Assert ($key.GetValue('Unrelated') -eq 'preserve') 'Unrelated value changed'
+    $key.DeleteValue('ProxySettings')
+    $missingRejected=$false
+    try{Set-EdgeLandingPolicy Enable $key $statePath}catch{$missingRejected=$true}
+    Assert $missingRejected 'Missing policy must not be silently overwritten'
+    Set-EdgeLandingPolicy Enable $key $statePath -RepairMissingProxy
+    Assert ($key.GetValue('ProxySettings') -like '*18484*') 'Explicit repair failed'
+    Assert ($first -eq (Get-Content $statePath -Raw -Encoding UTF8)) 'Repair destroyed original backup'
     Set-EdgeLandingPolicy Restore $key $statePath
     Assert ($key.GetValue('ProxySettings') -eq '{"ProxyMode":"system"}') 'Original proxy not restored'
     Assert ($key.GetValue('QuicAllowed') -eq 1) 'Original DWORD not restored'

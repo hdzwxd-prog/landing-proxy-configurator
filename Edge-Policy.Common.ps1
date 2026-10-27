@@ -30,13 +30,18 @@ function Save-EdgePolicyState($Path,$State) {
     else{[IO.File]::Move($tmp,$Path)}
 }
 function Set-EdgeLandingPolicy {
-    param([ValidateSet('Enable','Restore')]$Action,$Key,[string]$StatePath)
+    param([ValidateSet('Enable','Restore')]$Action,$Key,[string]$StatePath,[switch]$RepairMissingProxy)
     $before=Read-EdgePolicyValues $Key
     $state=if(Test-Path -LiteralPath $StatePath){Get-Content -LiteralPath $StatePath -Raw -Encoding UTF8|ConvertFrom-Json}else{$null}
     if($Action -eq 'Restore' -and (-not $state -or -not $state.enabled)){return}
     if($Action -eq 'Enable' -and $state -and $state.enabled) {
         foreach($name in $script:EdgeLandingValues.Keys){
+            if($RepairMissingProxy -and $name -eq 'ProxySettings' -and -not $before[$name].exists){continue}
             if(-not $before[$name].exists -or $before[$name].kind -ne $script:EdgeLandingValues[$name].kind -or $before[$name].value -cne $script:EdgeLandingValues[$name].value){throw 'Edge 设置已被其他程序修改，请先检查策略，未覆盖现有更改。'}
+        }
+        if($RepairMissingProxy -and -not $before['ProxySettings'].exists){
+            $Key.SetValue('ProxySettings',$script:EdgeLandingValues['ProxySettings'].value,[Microsoft.Win32.RegistryValueKind]::String)
+            $Key.Flush()
         }
         return
     }

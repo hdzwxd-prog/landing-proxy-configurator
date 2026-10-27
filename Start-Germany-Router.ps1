@@ -1,6 +1,7 @@
 ﻿$ErrorActionPreference = 'Continue'
 $mutex = [Threading.Mutex]::new($false, 'Local\GermanyRuleRouter18484')
-if (-not $mutex.WaitOne(0)) { exit 0 }
+try { $ownsMutex=$mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $ownsMutex=$true }
+if (-not $ownsMutex) { exit 0 }
 
 $winInetCode = @'
 using System;
@@ -34,6 +35,9 @@ $runtimeScripts = $PSScriptRoot
 $changeMutex = [Threading.Mutex]::new($false, 'Local\LandingRouteChange19090')
 $routerProcess = $null
 $script:lastGermanExit = ''
+$routeFailures = 0
+$lastNasRecovery = [DateTime]::MinValue
+$heartbeatFile = Join-Path $routerDir 'supervisor-heartbeat.txt'
 
 function Write-Health([string]$state, [string]$detail) {
     Set-Content -LiteralPath $healthFile -Encoding utf8 -Value @(
@@ -235,7 +239,9 @@ try {
 
     Ensure-LandingRuntime
     $landingChoice = Get-LandingChoice
-    if ($landingChoice -eq 'nas04') { Ensure-Nas04Socks }
+    if ($landingChoice -eq 'nas04') {
+        try { Ensure-Nas04Socks } catch { Write-Health 'degraded' 'NAS04 startup pending; supervisor will retry' }
+    }
     Set-LandingGroup 'LANDING' (Get-LandingTarget $landingChoice)
 
     $ready = $false
@@ -261,6 +267,8 @@ try {
         Start-Sleep -Seconds 2
         $currentMode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
         if ($currentMode -notin @('foreign','global','apps')) { break }
+        $mode = $currentMode
+        Set-Content -LiteralPath $heartbeatFile -Value ([DateTime]::UtcNow.ToString('o')) -Encoding ascii
         if ($routerProcess.HasExited) { Set-FailClosed 'Router process exited unexpectedly'; break }
 
         $settings = Get-SystemProxyFresh
@@ -291,10 +299,25 @@ try {
         if (([DateTime]::Now - $lastRouteHealth).TotalSeconds -ge 30) {
             $lastRouteHealth = [DateTime]::Now
             if (Test-GermanExit) {
+                $routeFailures = 0
                 Write-Health 'healthy' "mode=$currentMode; exit=$script:lastGermanExit; observed_proxy=$($settings.Server)"
             }
-            else { Set-FailClosed 'Selected landing exit health check failed' }
+            else {
+                $routeFailures++
+                Set-FailClosed 'Selected landing exit health check failed'
+                # Retry the SAME SSH route only. Never switch the user's upstream
+                # or landing, and never touch system proxy in apps mode.
+                if ((Get-LandingChoice) -eq 'nas04' -and $routeFailures -ge 2 -and
+                    ([DateTime]::Now - $lastNasRecovery).TotalSeconds -ge 120) {
+                    $lastNasRecovery = [DateTime]::Now
+                    Write-Health 'recovering' 'NAS04 failed two end-to-end checks; reconnecting same route'
+                    try { Stop-Nas04Socks; Ensure-Nas04Socks }
+                    catch { Write-Health 'degraded' 'NAS04 reconnect pending; supervisor remains active' }
+                }
+            }
         }
+        } catch {
+            Write-Health 'degraded' 'Controller or route check failed; retrying without changing route'
         } finally { $changeMutex.ReleaseMutex() }
     }
 }
@@ -302,12 +325,11 @@ catch {
     Set-FailClosed "Supervisor exception: $($_.Exception.Message)"
 }
 finally {
-    if (Test-Path -LiteralPath $stopNas04Script) {
-        & powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $stopNas04Script | Out-Null
-    }
     try {
         $finalMode = if (Test-Path -LiteralPath $modeFile) { (Get-Content -LiteralPath $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
-        if ($finalMode -ne 'apps') { Restore-BaseProxy 'landing supervisor exited' }
+        if ($finalMode -eq 'off') {
+            if (Test-Path -LiteralPath $stopNas04Script) { & powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $stopNas04Script | Out-Null }
+        } else { Write-Health 'degraded' 'Supervisor stopped; existing forwarding preserved; reconnect required' }
     }
     catch { Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) FALLBACK-BASE failed=$($_.Exception.Message)" }
     $mutex.ReleaseMutex()
