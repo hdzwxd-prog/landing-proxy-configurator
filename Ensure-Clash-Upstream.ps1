@@ -1,10 +1,12 @@
-﻿param([Parameter(Mandatory=$true)][string]$Endpoint, [string]$RouterDir = (Join-Path $env:USERPROFILE '.ssh\GermanyRouter'))
+﻿param([Parameter(Mandatory=$true)][string]$Endpoint, [string]$RouterDir = (Join-Path $env:USERPROFILE '.ssh\GermanyRouter'), [int]$SocksPort=18583, [int]$TransportPort=18584, [int]$ProxyPort=18484, [int]$ControllerPort=19090)
 $ErrorActionPreference='Stop'
 $endpointFile = Join-Path $routerDir 'clash-upstream.txt'
 $endpoint = $Endpoint.Trim() -replace '^https?://',''
 $parts = $endpoint.Split(':')
 $port=0
 if($parts.Count -ne 2 -or $parts[0] -notmatch '^[a-zA-Z0-9.-]+$' -or -not [int]::TryParse($parts[1],[ref]$port) -or $port -lt 1 -or $port -gt 65535){ throw 'Clash 接口格式应为 host:port' }
+if ($parts[0] -notin @('127.0.0.1','localhost')) { throw '上游必须是本机代理接口：127.0.0.1:端口。' }
+if ($port -in @($ProxyPort,$ControllerPort,$SocksPort,$TransportPort)) { throw '不能将落地自身端口设为上游，否则会形成代理回环。' }
 Set-Content -LiteralPath $endpointFile -Value ($parts[0]+':'+$port) -Encoding ascii
 $files = @((Join-Path $routerDir 'config-foreign.yaml'),(Join-Path $routerDir 'config-global.yaml'))
 foreach($file in $files){
@@ -29,7 +31,7 @@ foreach($file in $files){
       $lines.Add("${indent}- name: NAS04-SSH")
       $lines.Add("${indent}  type: socks5")
       $lines.Add("${indent}  server: 127.0.0.1")
-      $lines.Add("${indent}  port: 18583")
+      $lines.Add("${indent}  port: $SocksPort")
       $lines.Add("${indent}  udp: false")
       $inserted=$true
     }
@@ -57,7 +59,7 @@ foreach($file in $files){
       continue
     }
     if($line -match '^proxies:'){
-      $lines.Add('tunnels:'); $lines.Add('- tcp,127.0.0.1:18584,212.121.132.230:22,FIRST-HOP')
+      $lines.Add('tunnels:'); $lines.Add("- tcp,127.0.0.1:$TransportPort,212.121.132.230:22,FIRST-HOP")
     }
     # Terminal route groups reference the selectable exit, not a fixed server.
     $line = $line -replace '^(\s*-\s+)Germany-VLESS\s*$', '${1}LANDING'

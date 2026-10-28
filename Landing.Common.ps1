@@ -55,6 +55,10 @@ function Test-LandingExit([string]$choice, [int]$proxyPort = 18484) {
         try {
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
             $request = [Net.HttpWebRequest]::Create($url)
+            # A route change must be verified with a NEW transport, never a
+            # keep-alive connection established through the previous first hop.
+            $request.KeepAlive = $false
+            $request.ConnectionGroupName = [Guid]::NewGuid().ToString('N')
             $request.Proxy = New-Object Net.WebProxy("http://127.0.0.1:$proxyPort")
             $request.Timeout = 8000
             $request.ReadWriteTimeout = 8000
@@ -121,4 +125,26 @@ function Enter-LandingChange($mutex, [int]$timeout = 0) {
 
 function Test-LandingListener([int]$port) {
     return [bool]([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Where-Object { $_.Port -eq $port -and $_.Address.ToString() -eq '127.0.0.1' })
+}
+
+function Get-UpstreamChoice {
+    $file = Join-Path $routerDir 'upstream-choice.txt'
+    if ((Test-Path $file) -and (Get-Content $file -Raw).Trim() -eq 'wanda') { return 'wanda' }
+    return 'clash'
+}
+
+function Invoke-LandingReconnect([int]$proxyPort = 18484, [int]$socksPort = 18583, [int]$transportPort = 18584, [bool]$reload = $false) {
+    $landing = Get-LandingChoice
+    Write-LandingHealth $landing 'recovering' 'reconnecting selected route; upstream applications unchanged'
+    try {
+        if ($reload) { Update-LandingRuntime } else { Ensure-LandingRuntime }
+        Set-LandingGroup 'FIRST-HOP' (Get-UpstreamTarget (Get-UpstreamChoice))
+        Set-LandingGroup 'LANDING' (Get-LandingTarget $landing)
+        if ($landing -eq 'nas04') { Stop-Nas04Socks; Ensure-Nas04Socks $socksPort $transportPort }
+        if (-not (Test-LandingExit $landing $proxyPort)) { throw '所选链路出口检测失败；请检查上游客户端及节点，选择保持不变。' }
+        Write-LandingHealth $landing 'healthy' "reconnected; exit=$script:verifiedExit"
+    } catch {
+        Write-LandingHealth $landing 'degraded' 'reconnect failed; selected route retained; no direct fallback'
+        throw
+    }
 }

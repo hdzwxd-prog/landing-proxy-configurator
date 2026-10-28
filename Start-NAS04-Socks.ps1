@@ -9,7 +9,8 @@ $stateFile = Join-Path $routerDir 'nas04-process.json'
 $logFile = Join-Path $routerDir 'nas04-ssh.log'
 $sshPath = Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
 $mutex = [Threading.Mutex]::new($false, "Local\GermanyNas04Socks$SocksPort")
-if (-not $mutex.WaitOne(0)) { exit 0 }
+try { $ownsMutex = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
+if (-not $ownsMutex) { $mutex.Dispose(); exit 0 }
 $sshProcess = $null
 function Save-State {
     $owner = Get-Process -Id $PID

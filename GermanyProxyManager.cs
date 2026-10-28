@@ -414,7 +414,7 @@ namespace GermanyProxyManager
             reconnectButton.Location = new Point(900, 60);
             StyleActionButton(reconnectButton, Color.White, Navy);
             reconnectButton.FlatAppearance.BorderColor = Color.FromArgb(190, 201, 214);
-            reconnectButton.Click += delegate { Reconnect(); };
+            reconnectButton.Click += async delegate { await ReconnectAsync(); };
             testCard.Controls.Add(reconnectButton);
 
             Label footer = new Label();
@@ -606,6 +606,7 @@ namespace GermanyProxyManager
 
         private void ApplyMode(string mode)
         {
+            if (routeBusy) return;
             try
             {
                 Directory.CreateDirectory(RouterDir);
@@ -641,29 +642,15 @@ namespace GermanyProxyManager
             }
         }
 
-        private void Reconnect()
+        private async Task ReconnectAsync()
         {
-            try
+            if (ReadMode() == "off")
             {
-                string mode = ReadMode();
-                if (mode == "off")
-                {
-                    resultLabel.ForeColor = Gray;
-                    resultLabel.Text = "落地转发当前已关闭，无需重新连接。";
-                    return;
-                }
-
-                hasExitTest = false;
-                RunRestart();
-                resultLabel.ForeColor = Orange;
-                resultLabel.Text = "正在重连所选链路；仅应用模式保持系统代理不变。";
-                RefreshStatus();
+                resultLabel.ForeColor = Gray;
+                resultLabel.Text = "落地转发当前已关闭，无需重新连接。";
+                return;
             }
-            catch (Exception ex)
-            {
-                resultLabel.ForeColor = Red;
-                resultLabel.Text = "重连失败：" + ex.Message;
-            }
+            await ApplyRouteAsync(RestartScript, "");
         }
 
         private async Task ApplyRouteAsync(string script, string arguments)
@@ -1139,7 +1126,7 @@ namespace GermanyProxyManager
         {
             RunHidden(
                 "powershell.exe",
-                "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + RestartScript + "\""
+                "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + RestartScript + "\" -ReloadConfig"
             );
         }
 

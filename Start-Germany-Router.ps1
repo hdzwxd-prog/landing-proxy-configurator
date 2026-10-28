@@ -1,5 +1,21 @@
-﻿$ErrorActionPreference = 'Continue'
-$mutex = [Threading.Mutex]::new($false, 'Local\GermanyRuleRouter18484')
+﻿param(
+    [string]$RouterDir = (Join-Path $env:USERPROFILE '.ssh\GermanyRouter'),
+    [int]$ProxyPort = 18484,
+    [int]$ControllerPort = 19090,
+    [int]$SocksPort = 18583,
+    [int]$TransportPort = 18584,
+    [switch]$Isolated
+)
+$productionDir = Join-Path $env:USERPROFILE '.ssh\GermanyRouter'
+if ($Isolated) {
+    if ($RouterDir -eq $productionDir -or (@($ProxyPort,$ControllerPort,$SocksPort,$TransportPort) | Where-Object { $_ -in @(18484,19090,18583,18584,7892,7980) })) {
+        throw 'Isolated supervisor must not use production paths or ports.'
+    }
+} elseif ($RouterDir -ne $productionDir -or $ProxyPort -ne 18484 -or $ControllerPort -ne 19090 -or $SocksPort -ne 18583 -or $TransportPort -ne 18584) {
+    throw 'Non-production supervisor requires -Isolated.'
+}
+$ErrorActionPreference = 'Continue'
+$mutex = [Threading.Mutex]::new($false, "Local\GermanyRuleRouter$ProxyPort")
 try { $ownsMutex=$mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $ownsMutex=$true }
 if (-not $ownsMutex) { exit 0 }
 
@@ -13,26 +29,24 @@ public static class GermanyRouterWinInet {
 '@
 Add-Type $winInetCode -ErrorAction SilentlyContinue
 
-$routerDir = Join-Path $env:USERPROFILE '.ssh\GermanyRouter'
+
 $modeFile = Join-Path $routerDir 'mode.txt'
 $healthFile = Join-Path $routerDir 'route-health.txt'
 $upstreamHealthFile = Join-Path $routerDir 'upstream-health.txt'
 $upstreamChoiceFile = Join-Path $routerDir 'upstream-choice.txt'
 $supervisorLog = Join-Path $routerDir 'supervisor.log'
 $controllerSecretFile = Join-Path $routerDir 'controller-secret.txt'
-$ensureClashScript = Join-Path $routerDir 'Ensure-Clash-Upstream.ps1'
-$startNas04Script = Join-Path $routerDir '..\Start-NAS04-Socks.ps1'
 $stopNas04Script = Join-Path $routerDir '..\Stop-NAS04-Socks.ps1'
 $clashEndpointFile = Join-Path $routerDir 'clash-upstream.txt'
 $proxyBackupFile = Join-Path $routerDir 'proxy-restore.txt'
 $desktopUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $internetSettingsSubKey = "$desktopUserSid\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
 $mihomo = Join-Path $routerDir 'landing-router-core.exe'
-if (-not (Test-Path $mihomo)) { Copy-Item -LiteralPath 'D:\Software\Clash Verge\verge-mihomo.exe' -Destination $mihomo -ErrorAction Stop }
-$controller = 'http://127.0.0.1:19090'
+if (-not (Test-Path $mihomo)) { throw '独立落地核心缺失，请修复安装；不会启动或复制上游客户端。' }
+$controller = "http://127.0.0.1:$ControllerPort"
 $runtimeScripts = $PSScriptRoot
 . (Join-Path $routerDir 'Landing.Common.ps1')
-$changeMutex = [Threading.Mutex]::new($false, 'Local\LandingRouteChange19090')
+$changeMutex = [Threading.Mutex]::new($false, "Local\LandingRouteChange$ControllerPort")
 $routerProcess = $null
 $script:lastGermanExit = ''
 $routeFailures = 0
@@ -80,31 +94,8 @@ function Save-BaseProxy {
     finally { $key.Dispose(); $base.Dispose() }
 }
 
-function Restore-BaseProxy([string]$reason) {
-    if (-not (Test-Path -LiteralPath $proxyBackupFile)) { return }
-    $saved = @{}
-    foreach ($line in Get-Content -LiteralPath $proxyBackupFile) {
-        $parts = $line -split '=', 2
-        if ($parts.Count -eq 2) { $saved[$parts[0]] = $parts[1] }
-    }
-    $enabled = 0
-    [int]::TryParse([string]$saved['ProxyEnable'], [ref]$enabled) | Out-Null
-    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
-        [Microsoft.Win32.RegistryHive]::Users, [Microsoft.Win32.RegistryView]::Registry64
-    )
-    $key = $base.OpenSubKey($internetSettingsSubKey, $true)
-    try {
-        $key.SetValue('ProxyEnable', $enabled, [Microsoft.Win32.RegistryValueKind]::DWord)
-        $key.SetValue('ProxyServer', [string]$saved['ProxyServer'], [Microsoft.Win32.RegistryValueKind]::String)
-        $key.SetValue('ProxyOverride', [string]$saved['ProxyOverride'], [Microsoft.Win32.RegistryValueKind]::String)
-    }
-    finally { $key.Dispose(); $base.Dispose() }
-    Notify-ProxyChange
-    Remove-Item -LiteralPath $proxyBackupFile -Force -ErrorAction SilentlyContinue
-    Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) FALLBACK-BASE reason=$reason restored=$([string]$saved['ProxyServer'])"
-}
-
 function Set-SystemProxy([string]$proxy) {
+    if ($Isolated) { throw 'Isolated supervisor cannot change system proxy.' }
     if ($mode -ne 'apps') { Save-BaseProxy }
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
         [Microsoft.Win32.RegistryHive]::Users, [Microsoft.Win32.RegistryView]::Registry64
@@ -144,181 +135,86 @@ function Set-FailClosed([string]$reason) {
 }
 
 function Test-GermanExit {
-    $ok = Test-LandingExit (Get-LandingChoice)
+    $ok = Test-LandingExit (Get-LandingChoice) $ProxyPort
     if ($ok) { $script:lastGermanExit = $script:verifiedExit }
     return $ok
 }
 
-function Get-ControllerHeaders {
-    if (-not (Test-Path -LiteralPath $controllerSecretFile)) { return @{} }
-    $secret = (Get-Content -LiteralPath $controllerSecretFile -Raw).Trim()
-    return @{ Authorization="Bearer $secret" }
-}
-
-function Get-ProxyState([string]$name) {
-    try {
-        $encoded = [Uri]::EscapeDataString($name)
-        return Invoke-RestMethod -UseBasicParsing -Uri "$controller/proxies/$encoded" -Headers (Get-ControllerHeaders) -TimeoutSec 4
-    }
-    catch { return $null }
-}
-
-function Set-FirstHop([string]$name, [string]$reason) {
-    try {
-        $encoded = [Uri]::EscapeDataString('FIRST-HOP')
-        $body = @{ name=$name } | ConvertTo-Json -Compress
-        Invoke-RestMethod -UseBasicParsing -Method Put -Uri "$controller/proxies/$encoded" `
-            -Headers (Get-ControllerHeaders) -ContentType 'application/json' -Body $body -TimeoutSec 4 | Out-Null
-        Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) first-hop=$name reason=$reason"
-        return $true
-    }
-    catch {
-        Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) first-hop switch failed target=$name error=$($_.Exception.Message)"
-        return $false
-    }
-}
-
-function Get-ActiveUpstream {
-    $state = Get-ProxyState 'FIRST-HOP'
-    if ($state -and $state.now) { return [string]$state.now }
-    return ''
-}
-
 
 try {
-    $mode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
-    if ($mode -notin @('foreign','global','apps')) { exit 0 }
-
-    $upstreamChoice = if (Test-Path -LiteralPath $upstreamChoiceFile) {
-        (Get-Content -LiteralPath $upstreamChoiceFile -Raw).Trim().ToLowerInvariant()
-    } else { 'clash' }
-    if ($upstreamChoice -notin @('clash','wanda')) { $upstreamChoice='clash' }
-    $clashEndpoint = if (Test-Path -LiteralPath $clashEndpointFile) { (Get-Content -LiteralPath $clashEndpointFile -Raw).Trim() } else { '127.0.0.1:7980' }
-    if ($upstreamChoice -eq 'clash' -and (Test-Path -LiteralPath $ensureClashScript)) {
-        & powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $ensureClashScript -Endpoint $clashEndpoint | Out-Null
-    }
-
-    $configMode = Get-LandingConfigMode $mode
-    $config = Join-Path $routerDir "config-$configMode.yaml"
-    Write-Health 'starting' "mode=$mode"
-    Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) starting mode=$mode"
-    $existing = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 18484 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($existing) {
-        $routerProcess = Get-Process -Id $existing.OwningProcess -ErrorAction Stop
-        Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) reusing router pid=$($routerProcess.Id)"
-    }
-    else {
-        $routerProcess = Start-Process -FilePath $mihomo -ArgumentList @('-d',$routerDir,'-f',$config) -WindowStyle Hidden -PassThru
-    }
-
-    $controllerReady = $false
-    for ($i=0; $i -lt 10; $i++) {
-        Start-Sleep -Milliseconds 500
-        if ($routerProcess.HasExited) { break }
-        if (Get-ProxyState 'FIRST-HOP') { $controllerReady=$true; break }
-    }
-    if (-not $controllerReady) {
-        Set-FailClosed 'Router controller did not become ready'
-        exit 3
-    }
-
-    $clashPort = 7980
-    if ($clashEndpoint -match ':(\d+)$') { $clashPort = [int]$Matches[1] }
-    $clashAvailable = [bool](Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $clashPort -State Listen -ErrorAction SilentlyContinue)
-    $wandaAvailable = [bool](Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 7892 -State Listen -ErrorAction SilentlyContinue)
-    if ($upstreamChoice -eq 'clash') {
-        if (-not $clashAvailable) { Set-FailClosed "Selected Clash interface is not listening on $clashEndpoint"; exit 3 }
-        Set-FirstHop 'Clash-Upstream' 'manual Clash-compatible interface selection' | Out-Null
-        Write-UpstreamHealth 'manual' 'Clash-Upstream' '' -1 "manual interface $clashEndpoint"
-    }
-    elseif ($upstreamChoice -eq 'wanda') {
-        if (-not $wandaAvailable) { Set-FailClosed 'Selected WandaCloud compatibility interface is not listening on 7892'; exit 3 }
-        Set-FirstHop 'Wanda-Upstream' 'manual compatibility interface selection' | Out-Null
-        Write-UpstreamHealth 'manual' 'Wanda-Upstream' '' -1 'manual compatibility interface selection'
-    }
-
-    Ensure-LandingRuntime
-    $landingChoice = Get-LandingChoice
-    if ($landingChoice -eq 'nas04') {
-        try { Ensure-Nas04Socks } catch { Write-Health 'degraded' 'NAS04 startup pending; supervisor will retry' }
-    }
-    Set-LandingGroup 'LANDING' (Get-LandingTarget $landingChoice)
-
-    $ready = $false
-    for ($i=0; $i -lt 4; $i++) {
-        Start-Sleep -Seconds 2
-        if ($routerProcess.HasExited) { break }
-        if (Test-GermanExit) { $ready=$true; break }
-    }
-    if (-not $ready) {
-        Set-FailClosed 'Germany route did not become healthy during startup'
-        if ($routerProcess.HasExited) { exit 3 }
-    }
-    else {
-        if ($mode -ne 'apps') { Set-SystemProxy '127.0.0.1:18484' }
-        Write-Health 'healthy' "mode=$mode; exit=$script:lastGermanExit"
-        Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) active mode=$mode exit=$script:lastGermanExit"
-        # Existing applications keep their sessions; the manager never restarts Codex or Edge.
-    }
-
+    $appliedMode = ''
     $lastRouteHealth = [DateTime]::MinValue
     $lastUpstreamHealth = [DateTime]::MinValue
+    $lastCoreStart = [DateTime]::MinValue
+    Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) supervisor started; upstream applications unmanaged"
     while ($true) {
-        Start-Sleep -Seconds 2
-        $currentMode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
-        if ($currentMode -notin @('foreign','global','apps')) { break }
-        $mode = $currentMode
+        $mode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
+        if ($mode -notin @('foreign','global','apps')) { break }
+        if ($Isolated -and $mode -ne 'apps') { throw 'Isolated supervisor only supports apps mode.' }
         Set-Content -LiteralPath $heartbeatFile -Value ([DateTime]::UtcNow.ToString('o')) -Encoding ascii
-        if ($routerProcess.HasExited) { Set-FailClosed 'Router process exited unexpectedly'; break }
-
-        $settings = Get-SystemProxyFresh
-        if ($currentMode -ne 'apps' -and ($settings.Enabled -ne 1 -or $settings.Server -ne '127.0.0.1:18484')) {
-            Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) restoring active proxy from $($settings.Server) to 127.0.0.1:18484"
-            Set-SystemProxy '127.0.0.1:18484'
-        }
-
-        if (-not (Enter-LandingChange $changeMutex)) { continue }
+        if (-not (Enter-LandingChange $changeMutex)) { Start-Sleep -Seconds 2; continue }
         try {
-        if (([DateTime]::Now - $lastUpstreamHealth).TotalSeconds -ge 15) {
-            $lastUpstreamHealth = [DateTime]::Now
-            $selectedChoice = if (Test-Path -LiteralPath $upstreamChoiceFile) {
-                (Get-Content -LiteralPath $upstreamChoiceFile -Raw).Trim().ToLowerInvariant()
-            } else { 'clash' }
-            $expected = Get-UpstreamTarget $selectedChoice
-            $active = Get-ActiveUpstream
-            if ($active -ne $expected) { Set-FirstHop $expected 'restore manual interface selection' | Out-Null; $active=$expected }
-            $available = if ($active -eq 'Clash-Upstream') {
-                [bool](Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $clashPort -State Listen -ErrorAction SilentlyContinue)
-            } elseif ($active -eq 'Wanda-Upstream') {
-                [bool](Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 7892 -State Listen -ErrorAction SilentlyContinue)
-            } else { $false }
-            $state = if ($available) { 'manual' } else { 'degraded' }
-            Write-UpstreamHealth $state $active '' -1 'manual Clash-compatible interface selection'
-        }
-
-        if (([DateTime]::Now - $lastRouteHealth).TotalSeconds -ge 30) {
-            $lastRouteHealth = [DateTime]::Now
-            if (Test-GermanExit) {
-                $routeFailures = 0
-                Write-Health 'healthy' "mode=$currentMode; exit=$script:lastGermanExit; observed_proxy=$($settings.Server)"
+            $settings = Get-SystemProxyFresh
+            # Only explicitly selected system-wide modes own the system proxy.
+            if ($mode -ne 'apps' -and ($settings.Enabled -ne 1 -or $settings.Server -ne '127.0.0.1:18484')) {
+                Set-SystemProxy '127.0.0.1:18484'
             }
-            else {
-                $routeFailures++
-                Set-FailClosed 'Selected landing exit health check failed'
-                # Retry the SAME SSH route only. Never switch the user's upstream
-                # or landing, and never touch system proxy in apps mode.
-                if ((Get-LandingChoice) -eq 'nas04' -and $routeFailures -ge 2 -and
-                    ([DateTime]::Now - $lastNasRecovery).TotalSeconds -ge 120) {
-                    $lastNasRecovery = [DateTime]::Now
-                    Write-Health 'recovering' 'NAS04 failed two end-to-end checks; reconnecting same route'
-                    try { Stop-Nas04Socks; Ensure-Nas04Socks }
-                    catch { Write-Health 'degraded' 'NAS04 reconnect pending; supervisor remains active' }
+            $configMode = Get-LandingConfigMode $mode
+            $existing = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $ProxyPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($existing) {
+                $routerProcess = Get-Process -Id $existing.OwningProcess -ErrorAction Stop
+                if ($routerProcess.Path -ne $mihomo) { throw '18484 被其他进程占用；不会终止该进程。' }
+            } else {
+                if ($routerProcess -and -not $routerProcess.HasExited) { throw '落地核心尚未提供监听，保持等待。' }
+                if (([DateTime]::Now - $lastCoreStart).TotalSeconds -lt 15) { throw '等待独立核心恢复重试。' }
+                $lastCoreStart = [DateTime]::Now
+                $config = Join-Path $routerDir "config-$configMode.yaml"
+                $routerProcess = Start-Process -FilePath $mihomo -ArgumentList ('-d "'+$routerDir+'" -f "'+$config+'"') -WindowStyle Hidden -PassThru
+                $appliedMode = ''
+                $lastRouteHealth = [DateTime]::MinValue
+                Start-Sleep -Seconds 1
+            }
+            # A missing upstream/controller is a retryable state, never an exit.
+            Ensure-LandingRuntime
+            if ($appliedMode -and $appliedMode -ne $configMode) { Update-LandingRuntime }
+            $appliedMode = $configMode
+            $selectedChoice = Get-UpstreamChoice
+            $expected = Get-UpstreamTarget $selectedChoice
+            $active = (Invoke-LandingApi '/proxies/FIRST-HOP').now
+            if ($active -ne $expected) { Set-LandingGroup 'FIRST-HOP' $expected }
+            $landingChoice = Get-LandingChoice
+            $target = Get-LandingTarget $landingChoice
+            if ((Invoke-LandingApi '/proxies/LANDING').now -ne $target) { Set-LandingGroup 'LANDING' $target }
+
+            if (([DateTime]::Now - $lastUpstreamHealth).TotalSeconds -ge 15) {
+                $lastUpstreamHealth = [DateTime]::Now
+                $endpoint = if (Test-Path $clashEndpointFile) { (Get-Content $clashEndpointFile -Raw).Trim() } else { '127.0.0.1:7980' }
+                $port = if ($selectedChoice -eq 'wanda') { 7892 } else { [int]($endpoint.Split(':')[-1]) }
+                $state = if (Test-LandingListener $port) { 'manual' } else { 'degraded' }
+                Write-UpstreamHealth $state $expected '' -1 'local interface only; subscriptions and nodes owned by upstream'
+            }
+            if (([DateTime]::Now - $lastRouteHealth).TotalSeconds -ge 30) {
+                $lastRouteHealth = [DateTime]::Now
+                if ($landingChoice -eq 'nas04') { Ensure-Nas04Socks $SocksPort $TransportPort }
+                if (Test-GermanExit) {
+                    $routeFailures = 0
+                    Write-Health 'healthy' "mode=$mode; exit=$script:lastGermanExit; observed_proxy=$($settings.Server)"
+                } else {
+                    $routeFailures++
+                    Set-FailClosed 'Selected landing exit health check failed; waiting for the same upstream'
+                    if ($landingChoice -eq 'nas04' -and $routeFailures -ge 2 -and
+                        ([DateTime]::Now - $lastNasRecovery).TotalSeconds -ge 120) {
+                        $lastNasRecovery = [DateTime]::Now
+                        Write-Health 'recovering' 'NAS04 reconnecting same route'
+                        Stop-Nas04Socks
+                        Ensure-Nas04Socks $SocksPort $TransportPort
+                    }
                 }
             }
-        }
         } catch {
-            Write-Health 'degraded' 'Controller or route check failed; retrying without changing route'
+            Write-Health 'degraded' 'Selected route unavailable; supervisor will retry; upstream applications unchanged'
         } finally { $changeMutex.ReleaseMutex() }
+        Start-Sleep -Seconds 2
     }
 }
 catch {
@@ -328,7 +224,7 @@ finally {
     try {
         $finalMode = if (Test-Path -LiteralPath $modeFile) { (Get-Content -LiteralPath $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
         if ($finalMode -eq 'off') {
-            if (Test-Path -LiteralPath $stopNas04Script) { & powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $stopNas04Script | Out-Null }
+            if (Test-Path -LiteralPath $stopNas04Script) { & powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $stopNas04Script -RouterDir $routerDir | Out-Null }
         } else { Write-Health 'degraded' 'Supervisor stopped; existing forwarding preserved; reconnect required' }
     }
     catch { Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) FALLBACK-BASE failed=$($_.Exception.Message)" }
