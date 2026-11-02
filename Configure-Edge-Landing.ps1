@@ -54,6 +54,6 @@ try {
     Write-Output 'Edge 策略已写入。请在保存网页工作后完整退出并重开 Edge；代理刷新和隐私策略生效时间不同。'
 } catch {
     if($ErrorFile){[IO.File]::WriteAllText($ErrorFile,$_.Exception.Message,[Text.UTF8Encoding]::new($false))}
-    Write-Error $_.Exception.Message
+    [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
 }

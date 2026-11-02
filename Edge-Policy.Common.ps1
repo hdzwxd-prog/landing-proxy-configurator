@@ -35,13 +35,28 @@ function Set-EdgeLandingPolicy {
     $state=if(Test-Path -LiteralPath $StatePath){Get-Content -LiteralPath $StatePath -Raw -Encoding UTF8|ConvertFrom-Json}else{$null}
     if($Action -eq 'Restore' -and (-not $state -or -not $state.enabled)){return}
     if($Action -eq 'Enable' -and $state -and $state.enabled) {
+        # Explicit re-enable may encounter any mix of our policy and the
+        # original values after a restore or interrupted operation.
+        $target=[ordered]@{}
+        $needsWrite=$false
         foreach($name in $script:EdgeLandingValues.Keys){
-            if($RepairMissingProxy -and $name -eq 'ProxySettings' -and -not $before[$name].exists){continue}
-            if(-not $before[$name].exists -or $before[$name].kind -ne $script:EdgeLandingValues[$name].kind -or $before[$name].value -cne $script:EdgeLandingValues[$name].value){throw 'Edge 设置已被其他程序修改，请先检查策略，未覆盖现有更改。'}
+            $ours=$script:EdgeLandingValues[$name]
+            $actual=$before[$name]
+            $original=$state.original.$name
+            if(-not $original){throw "Edge 原设置备份缺少 $name，请检查备份。"}
+            $sameOurs=$actual.exists -and $actual.kind -eq $ours.kind -and $actual.value -ceq $ours.value
+            $sameOriginal=$actual.exists -eq $original.exists -and (-not $actual.exists -or ($actual.kind -eq $original.kind -and $actual.value -ceq $original.value))
+            $missingProxy=$RepairMissingProxy -and $name -eq 'ProxySettings' -and -not $actual.exists
+            if(-not ($sameOurs -or $sameOriginal -or $missingProxy)){throw "Edge 策略 $name 与落地设置及原备份均不一致。请在 edge://policy 核对该项。"}
+            if(-not $sameOurs){$needsWrite=$true}
+            $target[$name]=@{exists=$true;kind=$ours.kind;value=$ours.value}
         }
-        if($RepairMissingProxy -and -not $before['ProxySettings'].exists){
-            $Key.SetValue('ProxySettings',$script:EdgeLandingValues['ProxySettings'].value,[Microsoft.Win32.RegistryValueKind]::String)
-            $Key.Flush()
+        try {
+            if($needsWrite){Write-EdgePolicyValues $Key $target}
+            if($state.pending){$state.pending=$false;Save-EdgePolicyState $StatePath $state}
+        } catch {
+            if($needsWrite){Write-EdgePolicyValues $Key $before}
+            throw
         }
         return
     }

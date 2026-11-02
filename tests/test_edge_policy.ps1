@@ -22,6 +22,12 @@ try {
     Set-EdgeLandingPolicy Enable $key $statePath -RepairMissingProxy
     Assert ($key.GetValue('ProxySettings') -like '*18484*') 'Explicit repair failed'
     Assert ($first -eq (Get-Content $statePath -Raw -Encoding UTF8)) 'Repair destroyed original backup'
+    $key.SetValue('ProxySettings','{"ProxyMode":"system"}')
+    $key.DeleteValue('WebRtcLocalhostIpHandling')
+    $key.SetValue('QuicAllowed',1,[Microsoft.Win32.RegistryValueKind]::DWord)
+    Set-EdgeLandingPolicy Enable $key $statePath
+    Assert ($key.GetValue('ProxySettings') -like '*18484*' -and $key.GetValue('QuicAllowed') -eq 0 -and $key.GetValue('WebRtcLocalhostIpHandling') -eq 'disable_non_proxied_udp') 'Re-enable from original values failed'
+    Assert ($first -eq (Get-Content $statePath -Raw -Encoding UTF8)) 'Re-enable overwrote original backup'
     Set-EdgeLandingPolicy Restore $key $statePath
     Assert ($key.GetValue('ProxySettings') -eq '{"ProxyMode":"system"}') 'Original proxy not restored'
     Assert ($key.GetValue('QuicAllowed') -eq 1) 'Original DWORD not restored'
