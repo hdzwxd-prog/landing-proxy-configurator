@@ -64,7 +64,7 @@ NAS04 使用 Windows OpenSSH 动态 SOCKS：本地 `18583` 提供 SOCKS，`18584
 构建（无需 .NET SDK）：运行 `powershell -File .\Build.ps1`，产物在 `bin/LandingProxyConfigurator.exe`；也可使用下面的命令。
 
 ```powershell
-& "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /win32manifest:app.manifest /out:落地代理配置器.exe /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Net.Http.dll .\GermanyProxyManager.cs
+& "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /win32manifest:app.manifest /out:落地代理配置器.exe /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Net.Http.dll .\GermanyProxyManager.cs .\EdgeExitProbe.cs
 ```
 
 部署时，将 `Landing.Common.ps1`、`Set-Landing-Exit.ps1`、`Set-Germany-Upstream.ps1`、`Ensure-Clash-Upstream.ps1` 放入 `GermanyRouter`；其余运行脚本放入 `.ssh`。先备份待替换文件，再编译并更新桌面 EXE。代码中的部署路径对应本机用户。更新监督脚本时需要加载新监督进程；保留已有 Mihomo 及系统代理，避免中断其他应用。
@@ -99,3 +99,5 @@ NAS04 使用 Windows OpenSSH 动态 SOCKS：本地 `18583` 提供 SOCKS，`18584
 验证命令：python tests/test_upstream_reconnect.py --report <report.json>。在独立端口完成两轮 Clash/Wanda 往返、每次重连、错误接口回滚、NAS04/Wanda SSH 重连、缺失上游恢复、独立核心崩溃恢复和关闭模式保存。前后比较生产监听 PID、配置文件、系统代理、Edge 策略、Claude 代理配置，测试不终止生产进程。2026-10-28 通过；NAS04 经 Clash 的可用性不在本次通过结论内。首次测试遇到一次 Wanda 路径出口请求失败，完整复测通过，部分请求耗时约 11 秒；软件恢复能力不能保证上游节点永不波动。
 
 部署升级可以替换 UI 和独立监督进程，保留现有转发核心及应用连接。升级前后必须核验核心 PID、所选通道和系统代理未变；用户正在运行的 Claude/Codex 不需要重启。
+
+勾选或取消 Edge 代理后，配置器会在日常 Edge 打开一个当次有效的本机检测页，由浏览器查询公网 IP 并回传给界面。检测结果显示一分钟。出现出口不符时，保存网页、完整重开 Edge，再点“检查 Edge 出口”。若保存的开关与 Windows 策略不一致，界面会提示补回或清理策略。

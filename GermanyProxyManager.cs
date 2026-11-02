@@ -374,10 +374,7 @@ namespace GermanyProxyManager
             edgeTest.Size = new Size(220, 40);
             edgeTest.Location = new Point(512, 726);
             StyleActionButton(edgeTest, Color.White, Navy);
-            edgeTest.Click += delegate {
-                try { Process.Start("microsoft-edge:https://api.ipify.org"); }
-                catch (Exception ex) { MessageBox.Show(ex.Message, "Edge 出口检测"); }
-            };
+            edgeTest.Click += async delegate { await CheckEdgeExitAsync(); };
             Controls.Add(edgeTest);
             appConnectionLabel = new Label();
             appConnectionLabel.Text = "Claude 客户端连接尚未核对。下方绿色出口仅表示落地服务正常。";
@@ -432,12 +429,62 @@ namespace GermanyProxyManager
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Policies\Microsoft\Edge")) {
                     string value = key == null ? "" : Convert.ToString(key.GetValue("ProxySettings", ""));
                     edgeLandingCheck.Checked = value == "{\"ProxyMode\":\"fixed_servers\",\"ProxyServer\":\"http://127.0.0.1:18484\",\"ProxyBypassList\":\"<-loopback>\"}";
-                    edgePolicyLabel.Text = edgeLandingCheck.Checked
-                        ? "已配置；首次需重开 Edge，再检查出口"
-                        : "未启用；沿用 Edge 原代理设置";
-                    edgePolicyLabel.ForeColor = Gray;
+                    bool requested = EdgeRequested();
+                    if (requested != edgeLandingCheck.Checked) {
+                        edgePolicyLabel.Text = requested ? "要求走落地，但 Edge 代理策略已缺失。请重新勾选。" : "开关记录为关闭，但落地策略仍在。请取消勾选。";
+                        edgePolicyLabel.ForeColor = Red;
+                        return;
+                    }
+                    bool fresh = edgeVerifiedKey == EdgeRouteKey() && DateTime.UtcNow < edgeExpiry;
+                    edgePolicyLabel.Text = fresh ? edgeVerdict : (edgeLandingCheck.Checked
+                        ? "策略已写入，浏览器出口待实测" : "策略未启用，浏览器出口待实测");
+                    edgePolicyLabel.ForeColor = fresh ? edgeVerdictColor : Gray;
                 }
             } catch { edgePolicyLabel.Text = "无法读取 Edge 设置"; edgePolicyLabel.ForeColor = Orange; }
+        }
+
+        private string edgeVerifiedKey, edgeVerdict;
+        private DateTime edgeExpiry;
+        private Color edgeVerdictColor;
+        private bool EdgeRequested()
+        {
+            try {
+                string state = File.ReadAllText(Path.Combine(RouterDir, "edge-policy-state.json"));
+                return System.Text.RegularExpressions.Regex.IsMatch(state, @"""enabled""\s*:\s*true\b");
+            } catch { return edgeLandingCheck.Checked; }
+        }
+
+        private string EdgeRouteKey()
+        {
+            return edgeLandingCheck.Checked + "|" + ReadLandingChoice() + "|" + ReadUpstreamChoice() + "|" + GetSystemProxy();
+        }
+
+        private async Task CheckEdgeExitAsync()
+        {
+            if (edgePolicyBusy) return;
+            RefreshEdgePolicy();
+            bool wantLanding = EdgeRequested();
+            string key = EdgeRouteKey();
+            string landing = ReadLandingChoice();
+            edgePolicyBusy = true;
+            edgeLandingCheck.Enabled = false;
+            edgeVerifiedKey = null;
+            edgePolicyLabel.Text = "正在日常 Edge 中检测实际出口…";
+            try {
+                string ip = await Task.Run(() => EdgeExitProbe.Run());
+                bool matches = MatchesLanding(ip, landing);
+                edgeVerdict = "Edge 实测 " + ip + (matches == wantLanding
+                    ? (matches ? "，已走所选落地" : "，已离开所选落地")
+                    : "，与开关不符！请保存网页并完整重开 Edge 再测");
+                edgeVerdictColor = matches == wantLanding ? Green : Red;
+            } catch (Exception ex) { edgeVerdict = ex.Message; edgeVerdictColor = Red; }
+            finally {
+                edgeVerifiedKey = key;
+                edgeExpiry = DateTime.UtcNow.AddMinutes(1);
+                edgePolicyBusy = false;
+                edgeLandingCheck.Enabled = true;
+                RefreshEdgePolicy();
+            }
         }
 
         private async Task SetEdgePolicyAsync(bool enable)
@@ -448,10 +495,8 @@ namespace GermanyProxyManager
             try {
                 await Task.Run(delegate { RunHiddenChecked("powershell.exe",
                     "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + Path.Combine(RouterDir, "Configure-Edge-Landing.ps1") + "\" -Action " + (enable ? "Enable" : "Restore") + " -AllowElevation", 150000); });
-                MessageBox.Show(enable
-                    ? "已为日常 Edge 配置落地代理，包括默认浏览器打开的链接。\n请保存网页工作，完整退出并重开 Edge，然后点击“检查 Edge 出口”。\n落地服务停止时，Edge 会断网；取消勾选可恢复原代理。"
-                    : "已恢复 Edge 原来的代理及隐私策略。请完整退出并重开 Edge。",
-                    "Edge 设置", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                edgePolicyBusy = false;
+                await CheckEdgeExitAsync();
             } catch (Exception ex) { MessageBox.Show(ex.Message, "Edge 设置未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             finally { edgePolicyBusy = false; edgeLandingCheck.Enabled = true; RefreshEdgePolicy(); }
         }
