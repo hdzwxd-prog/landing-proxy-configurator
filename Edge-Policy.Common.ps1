@@ -33,7 +33,7 @@ function Set-EdgeLandingPolicy {
     param([ValidateSet('Enable','Restore')]$Action,$Key,[string]$StatePath,[switch]$RepairMissingProxy)
     $before=Read-EdgePolicyValues $Key
     $state=if(Test-Path -LiteralPath $StatePath){Get-Content -LiteralPath $StatePath -Raw -Encoding UTF8|ConvertFrom-Json}else{$null}
-    if($Action -eq 'Restore' -and (-not $state -or -not $state.enabled)){return}
+    if($Action -eq 'Restore' -and -not $state){return}
     if($Action -eq 'Enable' -and $state -and $state.enabled) {
         # Explicit re-enable may encounter any mix of our policy and the
         # original values after a restore or interrupted operation.
@@ -67,17 +67,25 @@ function Set-EdgeLandingPolicy {
         $state=[pscustomobject]@{enabled=$true;appliedAt=[DateTime]::UtcNow.ToString('o');original=$before;pending=$true}
         Save-EdgePolicyState $StatePath $state
     } else {
+        $needsRestore=$false
         foreach($name in $script:EdgeLandingValues.Keys){
             $original=$state.original.$name
             if(-not $original){throw 'Edge 原设置备份不完整；未修改策略。'}
             $sameOriginal=($before[$name].exists -eq $original.exists -and (-not $original.exists -or ($before[$name].kind -eq $original.kind -and $before[$name].value -ceq $original.value)))
             $sameOurs=($before[$name].exists -and $before[$name].kind -eq $script:EdgeLandingValues[$name].kind -and $before[$name].value -ceq $script:EdgeLandingValues[$name].value)
             if(-not $sameOriginal -and -not $sameOurs){throw 'Edge 策略已被其他程序修改；为保留新设置，未执行恢复。'}
+            if(-not $sameOriginal){$needsRestore=$true}
             $target[$name]=@{exists=$original.exists;kind=$original.kind;value=$original.value}
         }
+        if(-not $state.enabled -and -not $state.pending -and -not $needsRestore){return}
     }
     try {
         Write-EdgePolicyValues $Key $target
+        $readback=Read-EdgePolicyValues $Key
+        foreach($name in $target.Keys){
+            $v=$readback[$name];$expected=$target[$name]
+            if($v.exists -ne $expected.exists -or ($v.exists -and ($v.kind -ne $expected.kind -or $v.value -cne $expected.value))){throw "Edge 策略 $name 写入后核验失败。"}
+        }
         $state.enabled=($Action -eq 'Enable');$state.pending=$false
         $state.appliedAt=[DateTime]::UtcNow.ToString('o')
         Save-EdgePolicyState $StatePath $state

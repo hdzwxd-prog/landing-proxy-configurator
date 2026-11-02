@@ -32,7 +32,9 @@ try {
     Assert ($key.GetValue('ProxySettings') -eq '{"ProxyMode":"system"}') 'Original proxy not restored'
     Assert ($key.GetValue('QuicAllowed') -eq 1) 'Original DWORD not restored'
     Assert ($key.GetValueNames() -notcontains 'WebRtcLocalhostIpHandling') 'Previously absent setting was not removed'
+    $key.SetValue('ProxySettings',$script:EdgeLandingValues['ProxySettings'].value)
     Set-EdgeLandingPolicy Restore $key $statePath
+    Assert ($key.GetValue('ProxySettings') -eq '{"ProxyMode":"system"}') 'Disabled state left stale landing proxy'
     Set-EdgeLandingPolicy Enable $key $statePath
     $key.SetValue('ProxySettings','{"ProxyMode":"direct"}')
     $conflict=$false
