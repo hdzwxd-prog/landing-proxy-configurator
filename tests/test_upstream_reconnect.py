@@ -14,6 +14,7 @@ import yaml
 from test_landing import run, ps, listening, REPO, LIVE
 
 PORT, CONTROL, SOCKS, TRANSPORT = 18684, 19690, 18683, 18682
+GERMAN_EXITS = {'192.248.188.234', '2a05:f480:1800:2d04:5400:5ff:fe92:1848'}
 FLAGS = subprocess.CREATE_NO_WINDOW
 
 def snapshot():
@@ -119,7 +120,7 @@ def main():
             check(switch(choice))
             assert api('/proxies/FIRST-HOP')['now'] == ('Clash-Upstream' if choice=='clash' else 'Wanda-Upstream')
             assert (directory/'upstream-choice.txt').read_text().strip() == choice
-            assert exit_ip() == '192.248.188.234'
+            assert exit_ip() in GERMAN_EXITS
             check(reconnect())
             assert process.poll() is None and process.pid == original_pid
             step(f'{choice}: switch and reconnect verified; core PID preserved')
@@ -130,7 +131,7 @@ def main():
             assert switch('clash',bad).returncode != 0, 'Bad endpoint was accepted'
             assert {name:(directory/name).read_bytes() for name in protected} == saved
             assert api('/proxies/FIRST-HOP')['now'] == 'Wanda-Upstream'
-            assert exit_ip() == '192.248.188.234'
+            assert exit_ip() in GERMAN_EXITS
         step('Self-loop rejected; unreachable upstream rolls back files and live route')
         # Observe NAS04 compatibility separately: failure is valid only if rollback really works.
         nas = ps('Set-Landing-Exit.ps1','-Choice','nas04',*options)
@@ -143,7 +144,7 @@ def main():
             step('NAS04 via Wanda: exit and SSH reconnect verified')
         else:
             assert api('/proxies/LANDING')['now'] == 'Germany-VLESS'
-            assert exit_ip() == '192.248.188.234'
+            assert exit_ip() in GERMAN_EXITS
             step('NAS04 via Wanda unavailable; Germany rollback verified')
         # Terminate only our isolated process to exercise supervisor recovery.
         process.terminate()
@@ -164,7 +165,7 @@ def main():
         time.sleep(20)
         assert supervisor.poll() is None, 'Supervisor exited instead of waiting for upstream'
         check(switch('clash'))
-        assert exit_ip() == '192.248.188.234'
+        assert exit_ip() in GERMAN_EXITS
         step('Supervisor survives absent upstream and recovers when its endpoint returns')
         core_proc = run(['powershell.exe','-NoProfile','-Command',
             f'(Get-NetTCPConnection -LocalPort {CONTROL} -State Listen).OwningProcess'])
@@ -178,7 +179,7 @@ def main():
                     if api('/proxies/FIRST-HOP')['now']=='Clash-Upstream': break
                 except Exception: pass
         assert listening(CONTROL) and supervisor.poll() is None
-        assert exit_ip() == '192.248.188.234'
+        assert exit_ip() in GERMAN_EXITS
         step('Independent core crash recovered without restarting Wanda or Clash')
         (directory/'mode.txt').write_text('off')
         supervisor.wait(timeout=35)
