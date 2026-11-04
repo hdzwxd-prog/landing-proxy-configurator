@@ -1,9 +1,11 @@
 ﻿param([string]$ReportPath = (Join-Path $env:USERPROFILE '.ssh\GermanyRouter\claude-client-check.json'))
 $ErrorActionPreference='Stop'
+$strict=Test-Path (Join-Path $env:USERPROFILE '.ssh\GermanyRouter\StrictGermany\isolation-install.json')
+$expectedPort=if($strict){18485}else{18484}
 $processes=@(Get-CimInstance Win32_Process -Filter "Name='Claude.exe'")
 $connections=@(Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | Where-Object {$_.OwningProcess -in $processes.ProcessId})
-$landing=@($connections | Where-Object {$_.RemoteAddress -in @('127.0.0.1','::1') -and $_.RemotePort -eq 18484})
-$otherProxy=@($connections | Where-Object {$_.RemoteAddress -in @('127.0.0.1','::1') -and $_.RemotePort -in @(7890,7892,7980)})
+$landing=@($connections | Where-Object {$_.RemoteAddress -in @('127.0.0.1','::1') -and $_.RemotePort -eq $expectedPort})
+$otherProxy=@($connections | Where-Object {$_.RemoteAddress -in @('127.0.0.1','::1') -and $_.RemotePort -ne $expectedPort -and $_.RemotePort -in @(7890,7892,7980,18484,18485)})
 $external=@($connections | Where-Object {$_.RemoteAddress -notin @('127.0.0.1','::1')})
 $state='unverified'
 $text='Claude：当前无可核对的落地连接；请重开客户端并刷新。'

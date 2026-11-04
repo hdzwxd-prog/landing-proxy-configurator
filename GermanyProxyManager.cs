@@ -58,7 +58,7 @@ namespace GermanyProxyManager
         }
     }
 
-    internal sealed class MainForm : Form
+    internal sealed partial class MainForm : Form
     {
         private static readonly string RouterDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\GermanyRouter");
         private static readonly string ModeFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\GermanyRouter\mode.txt");
@@ -124,7 +124,7 @@ namespace GermanyProxyManager
         {
             Text = "落地代理配置器";
             AutoScaleMode = AutoScaleMode.None;
-            ClientSize = new Size(1100, 1040);
+            ClientSize = new Size(1100, Math.Min(1040, Screen.PrimaryScreen.WorkingArea.Height - 90));
             AutoScroll = true;
             MinimumSize = new Size(1100, 760);
             StartPosition = FormStartPosition.CenterScreen;
@@ -132,6 +132,7 @@ namespace GermanyProxyManager
             Font = new Font("Microsoft YaHei UI", 18F, FontStyle.Regular, GraphicsUnit.Pixel);
 
             BuildUi();
+            BuildStrictPanel();
             BuildTray();
             RefreshStatus();
 
@@ -144,7 +145,7 @@ namespace GermanyProxyManager
 
             statusTimer = new Timer();
             statusTimer.Interval = 2000;
-            statusTimer.Tick += delegate { RefreshStatus(); };
+            statusTimer.Tick += delegate { RefreshStatus(); RefreshStrictPanel(); };
             statusTimer.Start();
 
             if (Environment.GetCommandLineArgs().Any(
@@ -660,9 +661,9 @@ namespace GermanyProxyManager
 
                 if (mode == "off")
                 {
-                    RunCleanup();
+                    RunCleanup(false);
                     resultLabel.ForeColor = Green;
-                    resultLabel.Text = "落地服务已停止；上游保持运行，固定落地的 Claude 将断网。";
+                    resultLabel.Text = "普通落地已停止；Firefox / Claude 强制通道在上方单独控制。";
                 }
                 else
                 {
@@ -1159,8 +1160,10 @@ namespace GermanyProxyManager
             catch { }
         }
 
-        private static void RunCleanup()
+        private static void RunCleanup(bool stopStrict = true)
         {
+            if (stopStrict && File.Exists(Path.Combine(StrictDir, "Set-StrictUpstream.ps1")))
+                RunHiddenChecked("powershell.exe", "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + Path.Combine(StrictDir, "Set-StrictUpstream.ps1") + "\" -Stop");
             RunHidden(
                 "powershell.exe",
                 "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + CleanupScript + "\""

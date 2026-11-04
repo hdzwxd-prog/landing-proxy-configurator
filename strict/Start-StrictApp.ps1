@@ -1,4 +1,4 @@
-param([ValidateSet('Firefox','Claude')][string]$App='Firefox')
+param([ValidateSet('Firefox','Claude')][string]$App='Firefox',[switch]$NoDialog)
 $ErrorActionPreference='Stop'
 try {
     $root=Join-Path $env:USERPROFILE '.ssh\GermanyRouter\StrictGermany'
@@ -22,6 +22,7 @@ try {
         Start-Process -FilePath $exe -ArgumentList '--proxy-server=http://127.0.0.1:18485','--disable-quic','--force-webrtc-ip-handling-policy=disable_non_proxied_udp'
     }
 } catch {
+    if($NoDialog){throw}
     Add-Type -AssemblyName System.Windows.Forms
     [System.Windows.Forms.MessageBox]::Show($_.Exception.Message,'Germany-only proxy: launch blocked','OK','Warning')|Out-Null
     exit 1

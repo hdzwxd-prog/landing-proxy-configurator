@@ -27,6 +27,7 @@ static void clear(HANDLE h) {
 static void add(HANDLE h,const FWPM_FILTER_CONDITION0& identity,UINT16 port,const std::wstring& label) {
     // OR is expressed with separate block filters. The only surviving connect is TCP 127.0.0.1:port.
     for(int rule=0;rule<4;rule++) {
+        if(rule==1 && port==0)continue; // Core only: any local first-hop port, never public TCP/UDP.
         FWPM_FILTER_CONDITION0 c[2]={identity,{}};
         c[1].matchType=FWP_MATCH_NOT_EQUAL;
         if(rule==0) {c[1].fieldKey=FWPM_CONDITION_IP_REMOTE_ADDRESS;c[1].conditionValue.type=FWP_UINT32;c[1].conditionValue.uint32=0x7f000001;}
@@ -64,10 +65,12 @@ int wmain(int argc,wchar_t** argv) {
             }
             clear(h);
             if(mode==L"install")for(int i=2;i<argc;i+=3) {
-                int pn=_wtoi(argv[i+2]);if(pn<1||pn>65535)throw std::runtime_error("Invalid port");
+                wchar_t* end=nullptr;long pn=wcstol(argv[i+2],&end,10);
+                if(!*argv[i+2]||*end||pn<0||pn>65535)throw std::runtime_error("Invalid port");
                 FWPM_FILTER_CONDITION0 c={};c.matchType=FWP_MATCH_EQUAL;
                 std::wstring kind=argv[i];
-                if(kind==L"--app") {
+                if(pn==0 && kind!=L"--core")throw std::runtime_error("Only the forwarding core may use arbitrary local upstream ports");
+                if(kind==L"--app"||kind==L"--core") {
                     FWP_BYTE_BLOB* blob=nullptr;check(FwpmGetAppIdFromFileName0(argv[i+1],&blob));
                     c.fieldKey=FWPM_CONDITION_ALE_APP_ID;c.conditionValue.type=FWP_BYTE_BLOB_TYPE;c.conditionValue.byteBlob=blob;
                     try{add(h,c,(UINT16)pn,argv[i+1]);}catch(...){FwpmFreeMemory0((void**)&blob);throw;}FwpmFreeMemory0((void**)&blob);

@@ -1,5 +1,12 @@
 ﻿param([ValidateSet('Enable','Restore','Status')][string]$Action = 'Enable')
 $ErrorActionPreference = 'Stop'
+if(Test-Path (Join-Path $PSScriptRoot 'StrictGermany\isolation-install.json')){
+    if($Action -eq 'Restore'){throw 'Claude 已启用德国强制策略。普通落地恢复不能移除网络隔离。'}
+    $managed=Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Claude' -ErrorAction Stop
+    if($managed.egressProxyUrl -ne 'http://127.0.0.1:18485' -or $managed.egressProxyPacUrl){throw '德国强制策略异常，请重新安装并验证隔离。'}
+    Write-Output 'Claude 使用系统管理的德国强制入口 18485；普通落地选择不覆盖此设置。'
+    exit 0
+}
 $stateDir = Join-Path $env:USERPROFILE '.ssh\GermanyRouter'
 $stateFile = Join-Path $stateDir 'claude-landing-config.json'
 $proxy = 'http://127.0.0.1:18484'

@@ -1,6 +1,11 @@
 ﻿param([switch]$NoDialog)
 $ErrorActionPreference = 'Stop'
 try {
+    $strict=Join-Path $PSScriptRoot 'StrictGermany\Start-StrictApp.ps1'
+    if(Test-Path (Join-Path $PSScriptRoot 'StrictGermany\isolation-install.json')){
+        & $strict -App Claude -NoDialog
+        exit $LASTEXITCODE
+    }
     . (Join-Path $PSScriptRoot 'App-Landing.Common.ps1')
     Assert-AppLandingReady
     $package = Get-AppxPackage -Name 'Claude' | Sort-Object Version -Descending | Select-Object -First 1

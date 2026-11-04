@@ -18,7 +18,7 @@ try {
     $config=Get-Content (Join-Path $root 'config.json') -Raw | ConvertFrom-Json
     $upstream=@($config.proxies | Where-Object name -eq 'STRICT-UPSTREAM')[0]
     if($upstream.server -ne '127.0.0.1'){throw 'Non-local first hop refused'}
-    $arguments+=@('--app',(Join-Path $root 'strict-germany-core.exe'),[string]$upstream.port)
+    $arguments+=@('--core',(Join-Path $root 'strict-germany-core.exe'),'0')
     if($IncludeClaude){
         $key='HKLM:\SOFTWARE\Policies\Claude'
         $existing=Get-ItemProperty $key -ErrorAction SilentlyContinue
@@ -30,6 +30,8 @@ try {
         $package=Get-AppxPackage -Name Claude | Sort-Object Version -Descending | Select-Object -First 1
         if(-not $package){throw 'Claude package missing'}
         $claudePaths=@(Get-ChildItem -LiteralPath (Join-Path $package.InstallLocation 'app') -Filter '*.exe' -File -Recurse | Select-Object -ExpandProperty FullName)
+        $codeDir=Join-Path $env:LOCALAPPDATA ('Claude-Data\'+$package.PackageFamilyName+'\claude-code')
+        if(Test-Path $codeDir){$claudePaths+=@(Get-ChildItem -LiteralPath $codeDir -Filter 'claude.exe' -File -Recurse | Select-Object -ExpandProperty FullName)}
         foreach($path in $claudePaths){$arguments+=@('--app',$path,'18485')}
         $arguments+=@('--package',$package.PackageFamilyName,'18485')
         $targets+=$claudePaths
@@ -45,6 +47,6 @@ try {
     $state=@{ok=$true;installedAt=[DateTime]::UtcNow.ToString('o');claudeIncluded=[bool]$IncludeClaude;targets=$targets;port=18485;upstreamPort=$upstream.port;filterStatus=$filterStatus}
     $state | ConvertTo-Json -Depth 5 | Set-Content $report -Encoding UTF8
 } catch {
-    @{ok=$false;error=$_.Exception.Message} | ConvertTo-Json | Set-Content $report -Encoding UTF8
+    @{ok=$false;error=$_.Exception.Message;failedAt=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content (Join-Path $root 'isolation-install-error.json') -Encoding UTF8
     exit 1
 }
