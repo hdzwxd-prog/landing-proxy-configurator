@@ -1,0 +1,28 @@
+{
+  "policies": {
+    "Proxy": {
+      "Mode": "manual", "Locked": true,
+      "HTTPProxy": "127.0.0.1:18485", "SSLProxy": "127.0.0.1:18485",
+      "UseHTTPProxyForAllProtocols": true, "Passthrough": ""
+    },
+    "Preferences": {
+      "network.proxy.failover_direct": {"Value": false, "Status": "locked"},
+      "network.proxy.allow_hijacking_localhost": {"Value": true, "Status": "locked"},
+      "media.peerconnection.enabled": {"Value": false, "Status": "locked"},
+      "network.http.http3.enable": {"Value": false, "Status": "locked"},
+      "network.trr.mode": {"Value": 5, "Status": "locked"},
+      "network.dns.disablePrefetch": {"Value": true, "Status": "locked"},
+      "network.prefetch-next": {"Value": false, "Status": "locked"},
+      "geo.enabled": {"Value": false, "Status": "locked"},
+      "network.captive-portal-service.enabled": {"Value": false, "Status": "locked"},
+      "network.connectivity-service.enabled": {"Value": false, "Status": "locked"}
+    },
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "DisableDefaultBrowserAgent": true,
+    "BackgroundAppUpdate": false,
+    "NetworkPrediction": false,
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": ""
+  }
+}
