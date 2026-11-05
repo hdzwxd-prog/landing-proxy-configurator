@@ -114,3 +114,11 @@ NAS04 使用 Windows OpenSSH 动态 SOCKS：本地 `18583` 提供 SOCKS，`18584
 验证：`python tests/test_integrated_route.py` 10 项离线测试通过；`python tests/test_strict_config.py` 3 项通过；`python tests/test_joint_route_live.py --report <path>` 在独立 18684/19690/18683/18682 完成 Wanda/德国 → Clash/NAS04 → Wanda/德国、错误端口后双选择与配置恢复、真实出口复验。报告见 `tests/reports/joint-route-20261105.json`。这些测试未完整运行两个生产入口的联合切换，也未补齐 Claude Code 隔离验收。
 
 桌面 EXE 和三个配套脚本已更新；用实际窗口确认启动 Claude 按钮已移除，点击只读检查返回“Claude 未运行”。升级前后 7892/7980/18484/18485 的监听 PID、系统代理、选择文件与德国专用配置哈希不变，Claude 未启动。生产旧路线保留：常规 Clash/NAS04，Firefox/Claude Wanda/德国。
+
+### 2026-11-05 地址收纳与 IP.SB 检测页
+
+主界面下拉框显示 Clash/Wanda 及其地址；Clash 地址编辑收进高级设置，确定仅暂存，统一应用才生效。Wanda 目前仍为固定 127.0.0.1:7892。地址收纳版本此前已部署。
+
+本次“检查 Edge 出口（IP.SB）”改动继续由日常 Edge 自动核对出口，收到本机回执后在同一标签页跳转 https://ip.sb/，供用户查看网站提供的地区及运营商信息。自动取 IP 失败时也跳转，配置器保留失败提示；不把跳转本身当作出口验证成功。过渡页提供手动打开链接，设置 no-referrer，不访问 Claude。
+
+新版本已编译。通过模拟检查成功回执与 IP 查询失败两条 JavaScript 分支的跳转顺序，未做真实浏览器端到端测试。刷新运行中配置器的复合部署命令被自动审批以 blocked by policy 拒绝，未执行；IP.SB 改动尚未部署到桌面，已构建 EXE 位于 bin/LandingProxyConfigurator.exe。没有为本次检测启动或重启 Edge/Claude，没有切换代理。

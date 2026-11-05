@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.IO;
 using System.Threading.Tasks;
@@ -44,7 +44,7 @@ namespace GermanyProxyManager
             if (routeBusy || strictBusy) return;
             if (ReadMode() == "off") { resultLabel.Text = "请先选择转发模式，再应用统一配置。"; resultLabel.ForeColor = Orange; return; }
             try {
-                string endpoint = NormalizeEndpoint(clashEndpointBox.Text);
+                string endpoint = NormalizeEndpoint(stagedClashEndpoint);
                 string choice = UpstreamChoiceFromIndex(upstreamChoiceBox.SelectedIndex);
                 string landing = landingChoiceBox.SelectedIndex == 1 ? "nas04" : "germany";
                 if (!IsListening(18484)) {

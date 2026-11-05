@@ -39,20 +39,28 @@ namespace GermanyProxyManager
                             string[] request = header.ToString().Split(' ');
                             if (request.Length < 3 || request[0] != "GET") continue;
                             if (request[1] == path) {
-                                Reply(stream, "200 OK", @"<!doctype html><meta charset=utf-8><title>Edge 出口实测</title>
-<h2>日常 Edge 的公网出口</h2><p id=out>正在检测…</p>
+                                Reply(stream, "200 OK", @"<!doctype html><meta charset=utf-8><meta name=referrer content=no-referrer><title>正在打开 IP.SB</title>
+<style>body{font:18px system-ui;max-width:720px;margin:70px auto;padding:24px;color:#183153}a{color:#2271db}</style>
+<h2>正在核对 Edge 出口，随后打开 IP.SB</h2>
+<p>你可以在 IP.SB 查看当前出口的国家、地区和运营商。</p>
+<p>如果没有自动跳转，<a href='https://ip.sb/' rel=noreferrer>直接打开 IP.SB</a>。</p>
 <script>(async()=>{for(const host of ['api.ipify.org','api64.ipify.org']){try{
 const r=await fetch('https://'+host+'/?format=json&probe='+location.pathname.slice(1),{cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(8000)});
 if(!r.ok)continue;const ip=(await r.json()).ip;
-document.getElementById('out').textContent=ip;
-await fetch(location.pathname+'/ip/'+encodeURIComponent(ip),{cache:'no-store'});return;
-}catch(e){}}document.getElementById('out').textContent='浏览器未能取得出口，请重试';})();</script>");
+const ack=await fetch(location.pathname+'/ip/'+encodeURIComponent(ip),{cache:'no-store',signal:AbortSignal.timeout(2000)});
+if(!ack.ok)continue;await ack.text();location.replace('https://ip.sb/');return;
+}catch(e){}}
+try{await fetch(location.pathname+'/error',{cache:'no-store',signal:AbortSignal.timeout(2000)});}catch(e){}
+location.replace('https://ip.sb/');})();</script>");
                             } else if (request[1].StartsWith(path+"/ip/",StringComparison.Ordinal)) {
                                 IPAddress ip;
                                 if (IPAddress.TryParse(Uri.UnescapeDataString(request[1].Substring(path.Length+4)),out ip)) {
                                     Reply(stream,"200 OK","OK");
                                     return ip.ToString();
                                 }
+                            } else if (request[1] == path+"/error") {
+                                Reply(stream,"200 OK","OK");
+                                throw new InvalidOperationException("自动核对未取得出口；已打开 IP.SB，请查看网页结果。");
                             } else Reply(stream,"404 Not Found","");
                         } catch (IOException) { }
                     }

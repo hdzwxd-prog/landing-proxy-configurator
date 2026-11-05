@@ -101,7 +101,8 @@ namespace GermanyProxyManager
         private Button testButton;
         private Button reconnectButton;
         private Button refreshStatusButton;
-        private TextBox clashEndpointBox;
+        private string stagedClashEndpoint;
+        private Button advancedUpstreamButton;
         private ComboBox upstreamChoiceBox;
         private Button applyUpstreamButton;
         private ComboBox landingChoiceBox;
@@ -219,37 +220,29 @@ namespace GermanyProxyManager
             Controls.Add(interfaceTitle);
 
             Label interfaceHint = new Label();
-            interfaceHint.Text = "Clash 接口地址（本地 HTTP / 混合端口）；Wanda 使用 127.0.0.1:7892。";
+            interfaceHint.Text = "选择上游后自动使用对应地址；只有客户端端口变化时才需要高级设置。";
             interfaceHint.ForeColor = Gray;
             interfaceHint.AutoSize = true;
             interfaceHint.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Regular, GraphicsUnit.Pixel);
             interfaceHint.Location = new Point(34, 348);
             Controls.Add(interfaceHint);
 
-            clashEndpointBox = new TextBox();
-            clashEndpointBox.Location = new Point(34, 378);
-            clashEndpointBox.Size = new Size(360, 42);
-            clashEndpointBox.Font = new Font("Microsoft YaHei UI", 18F, FontStyle.Regular, GraphicsUnit.Pixel);
-            clashEndpointBox.Text = ReadClashEndpoint();
-            Controls.Add(clashEndpointBox);
-
-            Label interfaceDefault = new Label();
-            interfaceDefault.Text = "所有应用共用上游";
-            interfaceDefault.ForeColor = Gray;
-            interfaceDefault.AutoSize = true;
-            interfaceDefault.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Regular, GraphicsUnit.Pixel);
-            interfaceDefault.Location = new Point(560, 350);
-            Controls.Add(interfaceDefault);
-
+            stagedClashEndpoint = ReadClashEndpoint();
             upstreamChoiceBox = new ComboBox();
             upstreamChoiceBox.DropDownStyle = ComboBoxStyle.DropDownList;
-            upstreamChoiceBox.Items.Add("Clash");
-            upstreamChoiceBox.Items.Add("WandaCloud 7892");
-            upstreamChoiceBox.Location = new Point(560, 378);
-            upstreamChoiceBox.Size = new Size(220, 42);
-            upstreamChoiceBox.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Regular, GraphicsUnit.Pixel);
-            upstreamChoiceBox.SelectedIndex = UpstreamChoiceIndex(ReadUpstreamChoice());
+            upstreamChoiceBox.Location = new Point(34, 378);
+            upstreamChoiceBox.Size = new Size(420, 42);
+            upstreamChoiceBox.Font = new Font("Microsoft YaHei UI", 17F, FontStyle.Regular, GraphicsUnit.Pixel);
+            UpdateUpstreamChoices(UpstreamChoiceIndex(ReadUpstreamChoice()));
             Controls.Add(upstreamChoiceBox);
+
+            advancedUpstreamButton = new Button();
+            advancedUpstreamButton.Text = "高级设置…";
+            advancedUpstreamButton.Location = new Point(476, 378);
+            advancedUpstreamButton.Size = new Size(150, 42);
+            StyleActionButton(advancedUpstreamButton, Color.White, Navy);
+            advancedUpstreamButton.Click += delegate { EditUpstreamAddress(); };
+            Controls.Add(advancedUpstreamButton);
 
             applyUpstreamButton = new Button();
             applyUpstreamButton.Text = "应用全部设置";
@@ -345,8 +338,8 @@ namespace GermanyProxyManager
                 Controls.Add(action);
             }
             Button edgeTest = new Button();
-            edgeTest.Text = "检查 Edge 出口";
-            edgeTest.Size = new Size(220, 40);
+            edgeTest.Text = "检查 Edge 出口（IP.SB）";
+            edgeTest.Size = new Size(260, 40);
             edgeTest.Location = new Point(272, 726);
             StyleActionButton(edgeTest, Color.White, Navy);
             edgeTest.Click += async delegate { await CheckEdgeExitAsync(); };
@@ -444,7 +437,7 @@ namespace GermanyProxyManager
             edgePolicyBusy = true;
             edgeLandingCheck.Enabled = false;
             edgeVerifiedKey = null;
-            edgePolicyLabel.Text = "正在日常 Edge 中检测实际出口…";
+            edgePolicyLabel.Text = "正在核对 Edge 出口，随后打开 IP.SB 查看地区…";
             try {
                 string ip = await Task.Run(() => EdgeExitProbe.Run());
                 bool matches = MatchesLanding(ip, landing);
@@ -698,7 +691,8 @@ namespace GermanyProxyManager
             {
                 routeBusy = false;
                 SetRouteControls(true);
-                upstreamChoiceBox.SelectedIndex = UpstreamChoiceIndex(ReadUpstreamChoice());
+                stagedClashEndpoint = ReadClashEndpoint();
+                UpdateUpstreamChoices(UpstreamChoiceIndex(ReadUpstreamChoice()));
                 landingChoiceBox.SelectedIndex = ReadLandingChoice() == "nas04" ? 1 : 0;
                 RefreshStatus();
             }
@@ -707,7 +701,7 @@ namespace GermanyProxyManager
         private void SetRouteControls(bool enabled)
         {
             foreach (Control control in new Control[] {applyUpstreamButton,
-                clashEndpointBox, upstreamChoiceBox, landingChoiceBox,
+                advancedUpstreamButton, upstreamChoiceBox, landingChoiceBox,
                 offButton, foreignButton, globalButton, appsButton, reconnectButton,
                 testButton, refreshStatusButton}) control.Enabled = enabled;
         }
@@ -742,6 +736,50 @@ namespace GermanyProxyManager
         {
             if (index == 1) return "wanda";
             return "clash";
+        }
+
+        private void UpdateUpstreamChoices(int selectedIndex)
+        {
+            upstreamChoiceBox.Items.Clear();
+            upstreamChoiceBox.Items.Add("Clash（" + stagedClashEndpoint + "）");
+            upstreamChoiceBox.Items.Add("Wanda（127.0.0.1:7892）");
+            upstreamChoiceBox.SelectedIndex = selectedIndex;
+        }
+
+        private void EditUpstreamAddress()
+        {
+            if (routeBusy || strictBusy) return;
+            using (Form dialog = new Form())
+            {
+                dialog.Text = "上游代理 · 高级设置";
+                dialog.ClientSize = new Size(620, 252);
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.MaximizeBox = false; dialog.MinimizeBox = false;
+                dialog.Font = new Font("Microsoft YaHei UI", 16F, FontStyle.Regular, GraphicsUnit.Pixel);
+                dialog.Controls.Add(new Label { Text = "Clash 本地 HTTP / 混合接口", AutoSize = true, Location = new Point(24, 22) });
+                TextBox endpoint = new TextBox { Text = stagedClashEndpoint, Location = new Point(24, 56), Size = new Size(568, 32) };
+                dialog.Controls.Add(endpoint);
+                dialog.Controls.Add(new Label { Text = "Wanda：127.0.0.1:7892（当前版本固定接口）", AutoSize = true, Location = new Point(24, 102), ForeColor = Gray });
+                dialog.Controls.Add(new Label { Text = "确定仅暂存地址；返回主界面点“应用全部设置”才会生效。", AutoSize = true, Location = new Point(24, 145), ForeColor = Gray });
+                Button accept = new Button { Text = "确定", Location = new Point(370, 194), Size = new Size(104, 38) };
+                Button cancel = new Button { Text = "取消", Location = new Point(488, 194), Size = new Size(104, 38), DialogResult = DialogResult.Cancel };
+                accept.Click += delegate {
+                    try {
+                        string value = NormalizeEndpoint(endpoint.Text);
+                        int port = ParseEndpointPort(value);
+                        if (!value.StartsWith("127.0.0.1:", StringComparison.Ordinal) || new[] {18484,18485,18583,18584,19090}.Contains(port))
+                            throw new InvalidOperationException("请填写本机上游接口 127.0.0.1:端口，不能使用落地自身端口。");
+                        int selection = upstreamChoiceBox.SelectedIndex;
+                        stagedClashEndpoint = value;
+                        UpdateUpstreamChoices(selection);
+                        dialog.DialogResult = DialogResult.OK;
+                    } catch (Exception ex) { MessageBox.Show(dialog, ex.Message, "地址无效", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                };
+                dialog.Controls.Add(accept); dialog.Controls.Add(cancel);
+                dialog.AcceptButton = accept; dialog.CancelButton = cancel;
+                dialog.ShowDialog(this);
+            }
         }
 
         private static string NormalizeEndpoint(string value)
