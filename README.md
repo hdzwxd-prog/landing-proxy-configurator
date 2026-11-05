@@ -53,6 +53,8 @@ NAS04 使用 Windows OpenSSH 动态 SOCKS：本地 `18583` 提供 SOCKS，`18584
 
 ## 源码、配置和升级
 
+桌面只保留“落地代理配置器.exe”一个入口；不再维护“德国代理切换器.exe”副本或旧 Claude 落地启动器。桌面程序备份统一归档到 `%LOCALAPPDATA%\LandingProxyConfigurator\Archive` 的时间戳目录，附原路径和 SHA256 清单，禁止在桌面堆放备份及项目文件。源码、测试及构建产物保留在本仓库。
+
 本仓库是源码；本机运行配置位于 `%USERPROFILE%\.ssh\GermanyRouter`，SSH 启停和路由监督脚本位于 `%USERPROFILE%\.ssh`。`landing-choice.txt` 保存落地选择，`upstream-choice.txt` 保存上游选择。敏感运行配置不进入 Git。
 
 - `GermanyProxyManager.cs`：界面、状态检测。
