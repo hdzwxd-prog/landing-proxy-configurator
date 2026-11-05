@@ -13,6 +13,7 @@ namespace GermanyProxyManager
         private Label strictStatus;
         private bool strictBusy;
         private DateTime strictVerifiedUntil;
+        private DateTime strictRecoveryAfter;
         private void BuildStrictPanel()
         {
             if (!File.Exists(Path.Combine(StrictDir, "isolation-install.json"))) return;
@@ -67,7 +68,15 @@ namespace GermanyProxyManager
         private void RefreshStrictPanel()
         {
             if (strictStatus == null || strictBusy) return;
-            if (!IsListening(18485)) { strictStatus.Text = "德国强制通道未运行。Firefox / Claude 保持阻断；选通道后点“应用通道 / 重连”。"; strictStatus.ForeColor = Red; }
+            if (!IsListening(18485)) {
+                strictStatus.Text = "德国强制通道未运行。Firefox / Claude 保持阻断；选通道后点“应用通道 / 重连”。"; strictStatus.ForeColor = Red;
+                try {
+                    if (IsHandleCreated && !allowExit && DateTime.Now > strictRecoveryAfter && File.ReadAllText(Path.Combine(StrictDir,"enabled.txt")).Trim() == "true") {
+                        strictRecoveryAfter = DateTime.Now.AddSeconds(20);
+                        BeginInvoke(new Action(async delegate { if (!strictBusy && !allowExit) await RunStrictAction("Start-StrictGermany.ps1", "", true); }));
+                    }
+                } catch { }
+            }
             else if (strictVerifiedUntil != DateTime.MinValue && DateTime.Now > strictVerifiedUntil) { strictStatus.Text = "德国入口正在监听，出口检测已过期。固定德国、不回退；需要时点击检测。"; strictStatus.ForeColor = Orange; strictVerifiedUntil = DateTime.MinValue; }
             else if (String.IsNullOrEmpty(strictStatus.Text)) strictStatus.Text = "独立入口 18485 正在监听，尚未检测出口。下方普通落地设置不作用于 Firefox / Claude。";
         }
