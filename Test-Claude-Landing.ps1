@@ -8,9 +8,9 @@ $landing=@($connections | Where-Object {$_.RemoteAddress -in @('127.0.0.1','::1'
 $otherProxy=@($connections | Where-Object {$_.RemoteAddress -in @('127.0.0.1','::1') -and $_.RemotePort -ne $expectedPort -and $_.RemotePort -in @(7890,7892,7980,18484,18485)})
 $external=@($connections | Where-Object {$_.RemoteAddress -notin @('127.0.0.1','::1')})
 $state='unverified'
-$text='Claude：当前无可核对的落地连接；请重开客户端并刷新。'
+$text='Claude：本次未观察到代理连接，不能判定已受保护。此检查只读，不发起联网。'
 if (-not $processes.Count) {$text='Claude：未运行，尚未验证客户端连接。'}
-elseif ($otherProxy.Count -or $external.Count) {$state='bypass';$text='Claude：发现未走落地的连接，请完整退出并用“启动 Claude 客户端”重开。'}
+elseif ($otherProxy.Count -or $external.Count) {$state='bypass';$text='Claude：发现其他代理或非回环连接；需检查目标及隔离规则，不能判定已受保护。'}
 elseif ($landing.Count) {$state='observed';$text='Claude：本次观察到 '+$landing.Count+' 条落地连接；不代表所有功能均已验证。'}
 $report=[pscustomobject]@{
     timestamp=[DateTime]::UtcNow.ToString('o');state=$state;message=$text

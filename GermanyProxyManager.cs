@@ -102,11 +102,9 @@ namespace GermanyProxyManager
         private Button reconnectButton;
         private Button refreshStatusButton;
         private TextBox clashEndpointBox;
-        private Button applyClashButton;
         private ComboBox upstreamChoiceBox;
         private Button applyUpstreamButton;
         private ComboBox landingChoiceBox;
-        private Button applyLandingButton;
         private DateTime lastExitTestAt;
         private string lastExitChoice;
         private string lastTestRoute;
@@ -191,7 +189,7 @@ namespace GermanyProxyManager
             refreshStatusButton.Location = new Point(900, 12);
             StyleActionButton(refreshStatusButton, Color.White, Navy);
             refreshStatusButton.FlatAppearance.BorderColor = Color.FromArgb(190, 201, 214);
-            refreshStatusButton.Click += async delegate { await TestExitAsync(); };
+            refreshStatusButton.Click += async delegate { await TestAllExitsAsync(); };
             statusCard.Controls.Add(refreshStatusButton);
 
             wandaStatus = CreateStatusLabel("● Clash 接口 读取中", new Point(26, 55));
@@ -217,11 +215,11 @@ namespace GermanyProxyManager
             systemProxyValue.ForeColor = Gray;
             statusCard.Controls.Add(systemProxyValue);
 
-            Label interfaceTitle = CreateSectionTitle("Clash 接口", new Point(32, 310));
+            Label interfaceTitle = CreateSectionTitle("上游代理", new Point(32, 310));
             Controls.Add(interfaceTitle);
 
             Label interfaceHint = new Label();
-            interfaceHint.Text = "填写本地混合 / HTTP 端口；端口以客户端配置为准（7890 / 7980 等）。";
+            interfaceHint.Text = "Clash 接口地址（本地 HTTP / 混合端口）；Wanda 使用 127.0.0.1:7892。";
             interfaceHint.ForeColor = Gray;
             interfaceHint.AutoSize = true;
             interfaceHint.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -235,19 +233,8 @@ namespace GermanyProxyManager
             clashEndpointBox.Text = ReadClashEndpoint();
             Controls.Add(clashEndpointBox);
 
-            applyClashButton = new Button();
-            applyClashButton.Text = "应用接口";
-            applyClashButton.Size = new Size(130, 42);
-            applyClashButton.Location = new Point(410, 378);
-            StyleActionButton(applyClashButton, Blue, Color.White);
-            applyClashButton.Click += async delegate {
-                try { await ApplyRouteAsync(UpstreamScript, "-Choice clash -Endpoint \"" + NormalizeEndpoint(clashEndpointBox.Text) + "\""); }
-                catch (Exception ex) { resultLabel.Text = ex.Message; resultLabel.ForeColor = Red; }
-            };
-            Controls.Add(applyClashButton);
-
             Label interfaceDefault = new Label();
-            interfaceDefault.Text = "第一跳来源";
+            interfaceDefault.Text = "所有应用共用上游";
             interfaceDefault.ForeColor = Gray;
             interfaceDefault.AutoSize = true;
             interfaceDefault.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -256,7 +243,7 @@ namespace GermanyProxyManager
 
             upstreamChoiceBox = new ComboBox();
             upstreamChoiceBox.DropDownStyle = ComboBoxStyle.DropDownList;
-            upstreamChoiceBox.Items.Add("当前 Clash 接口");
+            upstreamChoiceBox.Items.Add("Clash");
             upstreamChoiceBox.Items.Add("WandaCloud 7892");
             upstreamChoiceBox.Location = new Point(560, 378);
             upstreamChoiceBox.Size = new Size(220, 42);
@@ -265,20 +252,14 @@ namespace GermanyProxyManager
             Controls.Add(upstreamChoiceBox);
 
             applyUpstreamButton = new Button();
-            applyUpstreamButton.Text = "应用第一跳";
-            applyUpstreamButton.Size = new Size(125, 42);
+            applyUpstreamButton.Text = "应用全部设置";
+            applyUpstreamButton.Size = new Size(180, 42);
             applyUpstreamButton.Location = new Point(792, 378);
             StyleActionButton(applyUpstreamButton, Blue, Color.White);
-            applyUpstreamButton.Click += async delegate {
-                try {
-                    string choice = UpstreamChoiceFromIndex(upstreamChoiceBox.SelectedIndex);
-                    string extra = choice == "clash" ? " -Endpoint \"" + NormalizeEndpoint(clashEndpointBox.Text) + "\"" : "";
-                    await ApplyRouteAsync(UpstreamScript, "-Choice " + choice + extra);
-                } catch (Exception ex) { resultLabel.Text = ex.Message; resultLabel.ForeColor = Red; }
-            };
+            applyUpstreamButton.Click += async delegate { await ApplyIntegratedAsync(); };
             Controls.Add(applyUpstreamButton);
 
-            Label landingTitle = CreateSectionTitle("落地出口", new Point(32, 438));
+            Label landingTitle = CreateSectionTitle("常规落地", new Point(32, 438));
             Controls.Add(landingTitle);
             landingChoiceBox = new ComboBox();
             landingChoiceBox.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -289,16 +270,9 @@ namespace GermanyProxyManager
             landingChoiceBox.Size = new Size(410, 38);
             landingChoiceBox.SelectedIndex = ReadLandingChoice() == "nas04" ? 1 : 0;
             Controls.Add(landingChoiceBox);
-            applyLandingButton = new Button();
-            applyLandingButton.Text = "应用落地";
-            applyLandingButton.Size = new Size(130, 40);
-            applyLandingButton.Location = new Point(600, 432);
-            StyleActionButton(applyLandingButton, Blue, Color.White);
-            applyLandingButton.Click += async delegate {
-                string choice = landingChoiceBox.SelectedIndex == 1 ? "nas04" : "germany";
-                await ApplyRouteAsync(LandingScript, "-Choice " + choice);
-            };
-            Controls.Add(applyLandingButton);
+            Label landingHint = new Label { Text = "Firefox / Claude 固定德国，见下方应用规则", AutoSize = true,
+                ForeColor = Gray, Location = new Point(600, 442), Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Regular, GraphicsUnit.Pixel) };
+            Controls.Add(landingHint);
 
             Label selectTitle = CreateSectionTitle("选择转发模式", new Point(32, 500));
             Controls.Add(selectTitle);
@@ -346,8 +320,8 @@ namespace GermanyProxyManager
             edgePolicyLabel.ForeColor = Gray;
             Controls.Add(edgePolicyLabel);
             RefreshEdgePolicy();
-            string[] launchNames = { "启动 Claude 客户端", "核对 Claude 连接" };
-            string[] launchScripts = { "Start-Claude-Landing.ps1", "Test-Claude-Landing.ps1" };
+            string[] launchNames = { "查看 Claude 本机连接" };
+            string[] launchScripts = { "Test-Claude-Landing.ps1" };
             for (int i = 0; i < launchNames.Length; i++)
             {
                 Button action = new Button();
@@ -373,12 +347,12 @@ namespace GermanyProxyManager
             Button edgeTest = new Button();
             edgeTest.Text = "检查 Edge 出口";
             edgeTest.Size = new Size(220, 40);
-            edgeTest.Location = new Point(512, 726);
+            edgeTest.Location = new Point(272, 726);
             StyleActionButton(edgeTest, Color.White, Navy);
             edgeTest.Click += async delegate { await CheckEdgeExitAsync(); };
             Controls.Add(edgeTest);
             appConnectionLabel = new Label();
-            appConnectionLabel.Text = "Claude 客户端连接尚未核对。下方绿色出口仅表示落地服务正常。";
+            appConnectionLabel.Text = "本机连接检查只读、不发起联网；服务出口检测不访问 Claude、不证明应用已接入。";
             appConnectionLabel.ForeColor = Gray;
             appConnectionLabel.Size = new Size(1020, 30);
             appConnectionLabel.Location = new Point(32, 778);
@@ -387,7 +361,7 @@ namespace GermanyProxyManager
             Panel testCard = CreateCard(new Point(28, 818), new Size(1044, 150));
             Controls.Add(testCard);
 
-            Label testTitle = CreateSectionTitle("落地服务出口检测（不代表应用已接入）", new Point(26, 17));
+            Label testTitle = CreateSectionTitle("服务出口检测（不访问 Claude，不证明应用已接入）", new Point(26, 17));
             testCard.Controls.Add(testTitle);
 
             resultLabel = new Label();
@@ -403,7 +377,7 @@ namespace GermanyProxyManager
             testButton.Size = new Size(120, 50);
             testButton.Location = new Point(766, 60);
             StyleActionButton(testButton, Blue, Color.White);
-            testButton.Click += async delegate { await TestExitAsync(); };
+            testButton.Click += async delegate { await TestAllExitsAsync(); };
             testCard.Controls.Add(testButton);
 
             reconnectButton = new Button();
@@ -650,9 +624,9 @@ namespace GermanyProxyManager
             return "off";
         }
 
-        private void ApplyMode(string mode)
+        private async void ApplyMode(string mode)
         {
-            if (routeBusy) return;
+            if (routeBusy || strictBusy) return;
             try
             {
                 Directory.CreateDirectory(RouterDir);
@@ -661,9 +635,9 @@ namespace GermanyProxyManager
 
                 if (mode == "off")
                 {
-                    RunCleanup(false);
+                    RunCleanup();
                     resultLabel.ForeColor = Green;
-                    resultLabel.Text = "普通落地已停止；Firefox / Claude 强制通道在上方单独控制。";
+                    resultLabel.Text = "全部落地已停止；Firefox / Claude 保持网络限制，不回退其他出口。";
                 }
                 else
                 {
@@ -679,6 +653,7 @@ namespace GermanyProxyManager
                         ? "系统代理保持不变；Claude 使用独立设置，Edge 可用下方开关接入。"
                         : "正在通过所选上游验证落地出口……";
                 }
+                if (mode != "off") await ApplyIntegratedAsync();
                 RefreshStatus();
             }
             catch (Exception ex)
@@ -696,7 +671,7 @@ namespace GermanyProxyManager
                 resultLabel.Text = "落地转发当前已关闭，无需重新连接。";
                 return;
             }
-            await ApplyRouteAsync(RestartScript, "");
+            await ApplyIntegratedAsync();
         }
 
         private async Task ApplyRouteAsync(string script, string arguments)
@@ -731,8 +706,8 @@ namespace GermanyProxyManager
 
         private void SetRouteControls(bool enabled)
         {
-            foreach (Control control in new Control[] {applyClashButton, applyUpstreamButton,
-                applyLandingButton, clashEndpointBox, upstreamChoiceBox, landingChoiceBox,
+            foreach (Control control in new Control[] {applyUpstreamButton,
+                clashEndpointBox, upstreamChoiceBox, landingChoiceBox,
                 offButton, foreignButton, globalButton, appsButton, reconnectButton,
                 testButton, refreshStatusButton}) control.Enabled = enabled;
         }
@@ -796,6 +771,11 @@ namespace GermanyProxyManager
             try
             {
                 string mode = ReadMode();
+                if (mode == "off") {
+                    resultLabel.Text = "落地已停止；未发起任何出口请求。";
+                    resultLabel.ForeColor = Gray;
+                    return;
+                }
                 if (mode != "off" && !IsListening(18484))
                     throw new InvalidOperationException("落地转发未连接，请点击“重新连接”。");
 
@@ -901,7 +881,7 @@ namespace GermanyProxyManager
             HighlightMode(foreignButton, mode == "foreign");
             HighlightMode(globalButton, mode == "global");
             HighlightMode(appsButton, mode == "apps");
-            if (clashEndpointBox != null && !clashEndpointBox.Focused) clashEndpointBox.Text = ReadClashEndpoint();
+            // Preserve the user's staged endpoint until Apply; timer refresh must not discard edits.
 
         }
 
@@ -916,8 +896,8 @@ namespace GermanyProxyManager
             string endpoint = ReadClashEndpoint();
             string choice = ReadUpstreamChoice();
             string label = choice == "wanda"
-                    ? "● WandaCloud 7892"
-                    : "● Clash 接口 " + endpoint;
+                    ? "● 常规上游 Wanda 7892"
+                    : "● 常规上游 Clash " + endpoint;
             if (mode == "off")
             {
                 SetStatus(wandaStatus, label, clashListening);

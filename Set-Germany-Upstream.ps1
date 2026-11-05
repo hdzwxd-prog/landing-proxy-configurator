@@ -1,6 +1,7 @@
 ﻿param(
     [Parameter(Mandatory=$true)][ValidateSet('clash','wanda')][string]$Choice,
     [string]$Endpoint = '127.0.0.1:7980',
+    [Alias('Landing')][ValidateSet('germany','nas04')][string]$SelectedLanding,
     [string]$RouterDir = (Join-Path $env:USERPROFILE '.ssh\GermanyRouter'),
     [int]$ControllerPort = 19090,
     [int]$ProxyPort = 18484,
@@ -18,13 +19,15 @@ $endpointFile = Join-Path $routerDir 'clash-upstream.txt'
 $previous = Get-UpstreamChoice
 $previousEndpoint = if (Test-Path $endpointFile) { (Get-Content $endpointFile -Raw).Trim() } else { '' }
 $landing = Get-LandingChoice
+$previousLanding = $landing
+if ($SelectedLanding) { $landing = $SelectedLanding }
 $mode = (Get-Content (Join-Path $routerDir 'mode.txt') -Raw).Trim()
 $changed = $false
 $configChanged = $false
 $savedFiles = @{}
 try {
     # Preserve exact bytes for rollback, including the absence of a file.
-    foreach ($name in @('config-foreign.yaml','config-global.yaml','clash-upstream.txt','upstream-choice.txt','upstream-health.txt')) {
+    foreach ($name in @('config-foreign.yaml','config-global.yaml','clash-upstream.txt','upstream-choice.txt','upstream-health.txt','landing-choice.txt')) {
         $path = Join-Path $routerDir $name
         $savedFiles[$path] = if (Test-Path $path) { [IO.File]::ReadAllBytes($path) } else { $null }
     }
@@ -38,10 +41,13 @@ try {
         $changed = $true
         if ($configChanged) { Update-LandingRuntime } else { Ensure-LandingRuntime }
         Set-LandingGroup 'FIRST-HOP' (Get-UpstreamTarget $Choice)
+        Set-LandingGroup 'LANDING' (Get-LandingTarget $landing)
         if ($landing -eq 'nas04') { Stop-Nas04Socks; Ensure-Nas04Socks $SocksPort $TransportPort }
         if (-not (Test-LandingExit $landing $ProxyPort)) { throw '新上游未通过落地出口检测' }
     }
     Set-Content $choiceFile $Choice -Encoding ascii
+    Set-Content (Join-Path $routerDir 'landing-choice.txt') $landing -Encoding ascii
+    if ($mode -ne 'off' -and $landing -ne 'nas04') { Stop-Nas04Socks }
     Set-Content (Join-Path $routerDir 'upstream-health.txt') -Encoding utf8 -Value @(
         "timestamp=$([DateTime]::Now.ToString('s'))",'state=manual',"active=$(Get-UpstreamTarget $Choice)"
     )
@@ -59,12 +65,14 @@ try {
         if ($changed) {
             if ($configChanged) { Update-LandingRuntime }
             Set-LandingGroup 'FIRST-HOP' (Get-UpstreamTarget $previous)
-            if ($landing -eq 'nas04') { Stop-Nas04Socks; Ensure-Nas04Socks $SocksPort $TransportPort }
-            $restored = Test-LandingExit $landing $ProxyPort
+            Set-LandingGroup 'LANDING' (Get-LandingTarget $previousLanding)
+            if ($previousLanding -eq 'nas04') { Stop-Nas04Socks; Ensure-Nas04Socks $SocksPort $TransportPort }
+            else { Stop-Nas04Socks }
+            $restored = Test-LandingExit $previousLanding $ProxyPort
         }
     } catch { $restored = $false }
-    if ($changed -and $restored) { Write-LandingHealth $landing 'healthy' "switch failed; previous upstream verified; exit=$script:verifiedExit" }
-    else { Write-LandingHealth $landing 'pending' 'switch failed; original selection retained; recheck required' }
+    if ($changed -and $restored) { Write-LandingHealth $previousLanding 'healthy' "switch failed; previous upstream verified; exit=$script:verifiedExit" }
+    else { Write-LandingHealth $previousLanding 'pending' 'switch failed; original selection retained; recheck required' }
     if ($restored) { throw "$failure；已保留原上游选择。" }
     throw "$failure；原选择已保留，但链路未恢复，请重新连接。"
 } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }

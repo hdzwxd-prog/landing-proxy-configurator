@@ -1,0 +1,39 @@
+{
+  "steps": [
+    "wanda/germany: joint choice and actual exit verified",
+    "clash/nas04: joint choice and actual exit verified",
+    "wanda/germany: joint choice and actual exit verified",
+    "Failed joint change restores both choices, exact configuration and Germany connectivity"
+  ],
+  "ports": [
+    18684,
+    19690,
+    18683,
+    18682
+  ],
+  "probes": [
+    {
+      "url": "https://api.ipify.org",
+      "code": 0,
+      "seconds": 2.24
+    },
+    {
+      "url": "https://api.ipify.org",
+      "code": 0,
+      "seconds": 1.5
+    },
+    {
+      "url": "https://api.ipify.org",
+      "code": 0,
+      "seconds": 1.32
+    },
+    {
+      "url": "https://api.ipify.org",
+      "code": 0,
+      "seconds": 4.6
+    }
+  ],
+  "passed": true,
+  "production_unchanged": true,
+  "isolated_ports_closed": true
+}
