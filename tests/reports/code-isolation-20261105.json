@@ -1,0 +1,66 @@
+{
+  "updatedAt": "2026-11-05T05:43:43.1832923Z",
+  "verifiedTargetCount": 25,
+  "filterStatus": "persistent_filters=107",
+  "codeVersions": [
+    "2.1.309",
+    "2.1.317"
+  ],
+  "method": "additive; previous rules retained",
+  "probeResults": {
+    "production_service_stopped": false,
+    "real_claude_launched": false,
+    "cases": [
+      {
+        "program": "isolation-check.exe",
+        "allowed_port": 18485,
+        "passed": true,
+        "tcp_observations": [
+          "TCP 127.0.0.1:18485 ALLOWED",
+          "TCP 127.0.0.1:7892 ERROR 10013",
+          "TCP 127.0.0.1:7980 ERROR 10013",
+          "TCP 127.0.0.1:18484 ERROR 10013",
+          "TCP 1.1.1.1:443 ERROR 10013",
+          "TCP ::1:18485 ERROR 10013",
+          "TCP 2606:4700:4700::1111:443 ERROR 10051",
+          "UDP 127.0.0.1:18485 ALLOWED",
+          "UDP 1.1.1.1:53 ALLOWED"
+        ],
+        "local_udp_received": null,
+        "public_ipv6_note": "10051 indicates unavailable network, not a verified WFP denial"
+      },
+      {
+        "program": "isolation-check-offline.exe",
+        "allowed_port": 18685,
+        "passed": true,
+        "tcp_observations": [
+          "TCP 127.0.0.1:18685 ERROR 10061",
+          "TCP 127.0.0.1:18485 ERROR 10013",
+          "TCP 127.0.0.1:7892 ERROR 10013",
+          "TCP 127.0.0.1:7980 ERROR 10013",
+          "TCP 127.0.0.1:18484 ERROR 10013",
+          "TCP 1.1.1.1:443 ERROR 10013",
+          "TCP ::1:18685 ERROR 10013",
+          "TCP 2606:4700:4700::1111:443 ERROR 10051",
+          "UDP 127.0.0.1:18685 ALLOWED",
+          "UDP 1.1.1.1:53 ALLOWED"
+        ],
+        "local_udp_received": false,
+        "public_ipv6_note": "10051 indicates unavailable network, not a verified WFP denial"
+      }
+    ],
+    "passed": true
+  },
+  "productionListenersUnchanged": true,
+  "systemProxyUnchanged": true,
+  "germanyExit": "192.248.188.234",
+  "observedClaudeStrictConnections": 29,
+  "observedOtherProxyConnections": 0,
+  "observedNonLoopbackConnections": 0,
+  "limits": [
+    "Exact registered executable paths only; arbitrary Code child executables are not covered automatically.",
+    "Future executable paths must be added and verified before they are treated as protected.",
+    "Public IPv6 had no route; public UDP was not captured at a receiver.",
+    "No real Claude session was subjected to service outage testing."
+  ]
+}
