@@ -59,3 +59,15 @@ Code/Cowork 任意子进程、虚拟机和共享 Python/Node 不因桌面程序�
 ## 2026-11-05 界面整合更正
 
 独立面板已替换为主界面的应用规则表，共用一个上游选择和应用/重连动作；底层保留德国专用核心以执行固定出口规则。“启动 Claude”已从界面删除，“查看 Claude 本机连接”纯本机只读。整合测试与部署范围见主 README。此前 Code 补装过滤器的管理员提示最终被取消，未完成安装；不能表述为仍在等待或已经覆盖。
+
+## Claude Code 路径升级补充保护
+
+`Update-CodeIsolation.ps1` 枚举已安装的 Claude Code 原生引擎路径，通过 `StrictNetworkLock.exe ensure` 在 WFP 事务中补充缺失规则；不调用原先清空并重建规则的安装分支，不改变现有 Firefox、Claude 桌面、包身份和核心规则。新 `verify` 动作核对实际安装的四项持久阻断条件，包括程序标识、IPv4 地址、端口、协议及 IPv6 层，不能用安装记录代替。
+
+升级工具需要 Windows 管理员授权，不需要启动、重启或登录 Claude。程序路径变化后需要再次运行补充保护；此功能没有消除任意新路径首次运行之前的保护缺口，也不隔离任意 shell/Python/Node 子进程。
+
+`tests/test_code_isolation_installed.py` 仅运行不含账户数据的测试程序：一个允许 18485，另一个使用空的 18685 模拟入口缺失。检查普通代理及公网连接被拒绝，并对测试端口做本机 UDP 接收侧检查；不停止真实德国核心，不改变真实 Claude 的路径。该测试验证相同过滤条件的行为，不能冒充完整 Claude 会话断路实测。
+
+2026-11-05：工具及测试程序已构建，第一次补充规则的管理员授权返回“操作已被用户取消”，尚未安装新增覆盖，也尚未运行安装后的测试。现有保护保留。
+
+WFP 规则变更会触发 ALE 连接重新授权，不能把安装规则描述为对所有已有连接都毫无影响；允许的德国入口保持不变。参考：[Microsoft ALE reauthorization](https://learn.microsoft.com/en-us/windows/win32/fwp/ale-re-authorization)。

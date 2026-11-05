@@ -13,5 +13,5 @@ class NetworkProbe {
             }catch(SocketException e){Console.WriteLine((udp?"UDP ":"TCP ")+address+":"+port+" ERROR "+e.ErrorCode);}
         }
     }
-    static void Main(){Test("127.0.0.1",18485,false);Test("127.0.0.1",7892,false);Test("127.0.0.1",7980,false);Test("127.0.0.1",18484,false);Test("1.1.1.1",443,false);Test("::1",18485,false);Test("2606:4700:4700::1111",443,false);Test("127.0.0.1",18485,true);Test("1.1.1.1",53,true);}
+    static void Main(string[] args){int port=args.Length==1?Int32.Parse(args[0]):18485;Test("127.0.0.1",port,false);if(port!=18485)Test("127.0.0.1",18485,false);Test("127.0.0.1",7892,false);Test("127.0.0.1",7980,false);Test("127.0.0.1",18484,false);Test("1.1.1.1",443,false);Test("::1",port,false);Test("2606:4700:4700::1111",443,false);Test("127.0.0.1",port,true);Test("1.1.1.1",53,true);}
 }

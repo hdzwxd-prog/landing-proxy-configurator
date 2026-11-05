@@ -9,6 +9,7 @@
 #include <vector>
 #include <string>
 #include <stdexcept>
+#include <cstring>
 #pragma comment(lib, "fwpuclnt.lib")
 #pragma comment(lib, "userenv.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -42,6 +43,39 @@ static void add(HANDLE h,const FWPM_FILTER_CONDITION0& identity,UINT16 port,cons
         UINT64 id=0;check(FwpmFilterAdd0(h,&f,nullptr,&id));
     }
 }
+// Verify the actual persistent blocking predicates, not an installer state file or count.
+static unsigned appMask(HANDLE h, const FWP_BYTE_BLOB* app, UINT16 port) {
+    HANDLE en=nullptr;check(FwpmFilterCreateEnumHandle0(h,nullptr,&en));unsigned mask=0;
+    for(;;) {
+        FWPM_FILTER0** fs=nullptr;UINT32 n=0;DWORD e=FwpmFilterEnum0(h,en,128,&fs,&n);
+        if(e){FwpmFilterDestroyEnumHandle0(h,en);check(e);}
+        for(UINT32 i=0;i<n;i++) {
+            auto f=fs[i];
+            if(!f->providerKey || !IsEqualGUID(*f->providerKey,provider) ||
+               !IsEqualGUID(f->subLayerKey,sublayer) || f->action.type!=FWP_ACTION_BLOCK ||
+               !(f->flags&FWPM_FILTER_FLAG_PERSISTENT))continue;
+            bool identity=false;const FWPM_FILTER_CONDITION0* predicate=nullptr;
+            for(UINT32 j=0;j<f->numFilterConditions;j++) {
+                auto c=&f->filterCondition[j];
+                if(IsEqualGUID(c->fieldKey,FWPM_CONDITION_ALE_APP_ID) && c->matchType==FWP_MATCH_EQUAL &&
+                   c->conditionValue.type==FWP_BYTE_BLOB_TYPE) {
+                    auto b=c->conditionValue.byteBlob;
+                    identity=b && b->size==app->size && std::memcmp(b->data,app->data,app->size)==0;
+                } else predicate=c;
+            }
+            if(!identity)continue;
+            if(IsEqualGUID(f->layerKey,FWPM_LAYER_ALE_AUTH_CONNECT_V6) && f->numFilterConditions==1){mask|=8;continue;}
+            if(!IsEqualGUID(f->layerKey,FWPM_LAYER_ALE_AUTH_CONNECT_V4) || f->numFilterConditions!=2 ||
+               !predicate || predicate->matchType!=FWP_MATCH_NOT_EQUAL)continue;
+            auto c=predicate;
+            if(IsEqualGUID(c->fieldKey,FWPM_CONDITION_IP_REMOTE_ADDRESS) && c->conditionValue.type==FWP_UINT32 && c->conditionValue.uint32==0x7f000001)mask|=1;
+            if(IsEqualGUID(c->fieldKey,FWPM_CONDITION_IP_REMOTE_PORT) && c->conditionValue.type==FWP_UINT16 && c->conditionValue.uint16==port)mask|=2;
+            if(IsEqualGUID(c->fieldKey,FWPM_CONDITION_IP_PROTOCOL) && c->conditionValue.type==FWP_UINT8 && c->conditionValue.uint8==IPPROTO_TCP)mask|=4;
+        }
+        FwpmFreeMemory0((void**)&fs);if(!n)break;
+    }
+    FwpmFilterDestroyEnumHandle0(h,en);return mask;
+}
 int wmain(int argc,wchar_t** argv) {
     HANDLE h=nullptr;bool transaction=false;
     try {
@@ -53,6 +87,28 @@ int wmain(int argc,wchar_t** argv) {
             check(FwpmFilterCreateEnumHandle0(h,nullptr,&en));UINT32 total=0;
             for(;;){FWPM_FILTER0** fs=nullptr;UINT32 n=0;check(FwpmFilterEnum0(h,en,128,&fs,&n));for(UINT32 i=0;i<n;i++)if(fs[i]->providerKey && IsEqualGUID(*fs[i]->providerKey,provider))total++;FwpmFreeMemory0((void**)&fs);if(!n)break;}
             FwpmFilterDestroyEnumHandle0(h,en);std::cout<<"persistent_filters="<<total<<std::endl;
+        } else if(mode==L"ensure" || mode==L"verify") {
+            // Additive update: never remove existing Firefox, desktop, package or core rules.
+            if(argc<5 || (argc-2)%3)throw std::runtime_error("Invalid application targets");
+            if(mode==L"ensure"){check(FwpmTransactionBegin0(h,0));transaction=true;}
+            for(int i=2;i<argc;i+=3) {
+                wchar_t* end=nullptr;long pn=wcstol(argv[i+2],&end,10);
+                if(std::wstring(argv[i])!=L"--app" || !*argv[i+2] || *end || pn<1 || pn>65535)
+                    throw std::runtime_error("Only explicit application paths and ports may be updated");
+                FWP_BYTE_BLOB* blob=nullptr;check(FwpmGetAppIdFromFileName0(argv[i+1],&blob));
+                try {
+                    unsigned mask=appMask(h,blob,(UINT16)pn);
+                    if(mask!=15 && mode==L"ensure") {
+                        FWPM_FILTER_CONDITION0 c={};c.fieldKey=FWPM_CONDITION_ALE_APP_ID;c.matchType=FWP_MATCH_EQUAL;
+                        c.conditionValue.type=FWP_BYTE_BLOB_TYPE;c.conditionValue.byteBlob=blob;
+                        add(h,c,(UINT16)pn,argv[i+1]);mask=appMask(h,blob,(UINT16)pn);
+                    }
+                    if(mask!=15)throw std::runtime_error("Required application block predicates missing");
+                }catch(...){FwpmFreeMemory0((void**)&blob);throw;}
+                FwpmFreeMemory0((void**)&blob);
+            }
+            if(transaction){check(FwpmTransactionCommit0(h));transaction=false;}
+            std::cout<<"verified_applications="<<(argc-2)/3<<std::endl;
         } else {
             if(mode!=L"install"&&mode!=L"remove")throw std::runtime_error("Unknown action");
             if(mode==L"install"&&(argc<5||(argc-2)%3))throw std::runtime_error("Invalid targets");
