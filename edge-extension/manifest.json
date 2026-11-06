@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "落地代理配置器 · Edge 会话接入",
+  "version": "0.2.0",
+  "description": "仅在配置器本次会话明确启用时接管代理；配置器断开时撤销本扩展设置。",
+  "permissions": ["proxy", "privacy", "nativeMessaging", "alarms"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "落地代理：点击重新连接配置器" }
+}

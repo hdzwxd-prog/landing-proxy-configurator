@@ -19,17 +19,6 @@ $mutex = [Threading.Mutex]::new($false, "Local\GermanyRuleRouter$ProxyPort")
 try { $ownsMutex=$mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $ownsMutex=$true }
 if (-not $ownsMutex) { exit 0 }
 
-$winInetCode = @'
-using System;
-using System.Runtime.InteropServices;
-public static class GermanyRouterWinInet {
-    [DllImport("wininet.dll", SetLastError=true)]
-    public static extern bool InternetSetOption(IntPtr hInternet, int option, IntPtr buffer, int length);
-}
-'@
-Add-Type $winInetCode -ErrorAction SilentlyContinue
-
-
 $modeFile = Join-Path $routerDir 'mode.txt'
 $healthFile = Join-Path $routerDir 'route-health.txt'
 $upstreamHealthFile = Join-Path $routerDir 'upstream-health.txt'
@@ -38,9 +27,6 @@ $supervisorLog = Join-Path $routerDir 'supervisor.log'
 $controllerSecretFile = Join-Path $routerDir 'controller-secret.txt'
 $stopNas04Script = Join-Path $routerDir '..\Stop-NAS04-Socks.ps1'
 $clashEndpointFile = Join-Path $routerDir 'clash-upstream.txt'
-$proxyBackupFile = Join-Path $routerDir 'proxy-restore.txt'
-$desktopUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$internetSettingsSubKey = "$desktopUserSid\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
 $mihomo = Join-Path $routerDir 'landing-router-core.exe'
 if (-not (Test-Path $mihomo)) { throw '独立落地核心缺失，请修复安装；不会启动或复制上游客户端。' }
 $controller = "http://127.0.0.1:$ControllerPort"
@@ -73,63 +59,7 @@ function Write-UpstreamHealth([string]$state, [string]$active, [string]$node, [i
     )
 }
 
-function Notify-ProxyChange {
-    [GermanyRouterWinInet]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0) | Out-Null
-    [GermanyRouterWinInet]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0) | Out-Null
-}
-
-function Save-BaseProxy {
-    if (Test-Path -LiteralPath $proxyBackupFile) { return }
-    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
-        [Microsoft.Win32.RegistryHive]::Users, [Microsoft.Win32.RegistryView]::Registry64
-    )
-    $key = $base.OpenSubKey($internetSettingsSubKey, $false)
-    try {
-        Set-Content -LiteralPath $proxyBackupFile -Encoding utf8 -Value @(
-            "ProxyEnable=$([int]$key.GetValue('ProxyEnable', 0))"
-            "ProxyServer=$([string]$key.GetValue('ProxyServer', ''))"
-            "ProxyOverride=$([string]$key.GetValue('ProxyOverride', ''))"
-        )
-    }
-    finally { $key.Dispose(); $base.Dispose() }
-}
-
-function Set-SystemProxy([string]$proxy) {
-    if ($Isolated) { throw 'Isolated supervisor cannot change system proxy.' }
-    if ($mode -ne 'apps') { Save-BaseProxy }
-    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
-        [Microsoft.Win32.RegistryHive]::Users, [Microsoft.Win32.RegistryView]::Registry64
-    )
-    $key = $base.OpenSubKey($internetSettingsSubKey, $true)
-    $key.SetValue('ProxyEnable', 1, [Microsoft.Win32.RegistryValueKind]::DWord)
-    $key.SetValue('ProxyServer', $proxy, [Microsoft.Win32.RegistryValueKind]::String)
-    $proxyOverride = [string]$key.GetValue('ProxyOverride', '')
-    $overrideItems = @($proxyOverride -split ';' | Where-Object { $_ })
-    foreach ($schoolBypass in @('slai.edu.cn', '*.slai.edu.cn')) {
-        if ($overrideItems -notcontains $schoolBypass) { $overrideItems += $schoolBypass }
-    }
-    $key.SetValue('ProxyOverride', ($overrideItems -join ';'), [Microsoft.Win32.RegistryValueKind]::String)
-    $key.Dispose()
-    $base.Dispose()
-    Notify-ProxyChange
-}
-
-function Get-SystemProxyFresh {
-    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
-        [Microsoft.Win32.RegistryHive]::Users, [Microsoft.Win32.RegistryView]::Registry64
-    )
-    $key = $base.OpenSubKey($internetSettingsSubKey, $false)
-    try {
-        return [pscustomobject]@{
-            Enabled=[int]$key.GetValue('ProxyEnable', 0)
-            Server=[string]$key.GetValue('ProxyServer', '')
-        }
-    }
-    finally { $key.Dispose(); $base.Dispose() }
-}
-
 function Set-FailClosed([string]$reason) {
-    if ($mode -ne 'apps') { Set-SystemProxy '127.0.0.1:18484' }
     Write-Health 'degraded' "$reason; fail_closed=127.0.0.1:18484"
     Add-Content -LiteralPath $supervisorLog -Value "$([DateTime]::Now.ToString('s')) FAIL-CLOSED $reason; kept=127.0.0.1:18484"
 }
@@ -154,11 +84,6 @@ try {
         Set-Content -LiteralPath $heartbeatFile -Value ([DateTime]::UtcNow.ToString('o')) -Encoding ascii
         if (-not (Enter-LandingChange $changeMutex)) { Start-Sleep -Seconds 2; continue }
         try {
-            $settings = Get-SystemProxyFresh
-            # Only explicitly selected system-wide modes own the system proxy.
-            if ($mode -ne 'apps' -and ($settings.Enabled -ne 1 -or $settings.Server -ne '127.0.0.1:18484')) {
-                Set-SystemProxy '127.0.0.1:18484'
-            }
             $configMode = Get-LandingConfigMode $mode
             $existing = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $ProxyPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($existing) {

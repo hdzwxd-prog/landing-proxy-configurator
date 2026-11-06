@@ -1,126 +1,70 @@
-﻿# 落地代理配置器
+﻿# 落地代理配置器 0.2
 
-独立的 Windows 托盘程序。Clash / Clash Verge / WandaCloud 管理订阅和节点，本程序读取其本地代理接口，再连接用户选择的落地出口。程序不启动、停止或配置 Clash/Wanda，不修改其订阅、节点、端口或 TUN。
+本软件只管理独立落地服务，不写 Windows 系统代理，不控制 Clash/Wanda 的进程、订阅、节点或系统代理开关。
+不开本软件时，普通网络由 Windows 和你自行启动的上游客户端管理。
 
-## 两个独立选择
+## 当前边界
 
-- **第一跳来源**：本地 Clash 混合 / HTTP 接口（现场端口为 7980；其他端口按客户端实际配置填写），或 WandaCloud SOCKS 7892。软件不再保存或选择任何订阅 / 节点。旧 BigAirport 入口迁移到已有的 Clash 本地接口。
-- **落地出口**：原德国 VLESS/WSS `192.248.188.234:443`，或 NAS04 `212.121.132.230`（SSH 用户 `h50055690`）。NAS04 是替代的最终出口，不是叠加在德国前面的第一跳。
+| 对象 | 谁管理 | 退出/故障行为 |
+|---|---|---|
+| 系统代理、Codex、普通应用 | Windows / 用户的 Clash 或 Wanda | 本软件不修改，不恢复旧快照 |
+| 独立常规落地入口 18484 | 本软件 | 服务停止后不可用 |
+| Edge 可选落地 | Edge 会话扩展 + 配置器的本机连接 | 退出/连接断开撤销扩展自己的代理覆盖；不设置普通上游 |
+| Firefox / Claude 德国入口 18485 | 德国专用核心 + 已安装应用隔离 | 入口不可用则受保护程序断网；不因 Edge 退出而解锁 |
 
-链路：
+所有流量规则仅作用于明确接入本软件的应用，不再提供修改系统代理的“全局模式”。
+选择 Clash/Wanda 是选择第一跳接口；订阅、节点仍在它们自己的客户端内选择。
+常规落地可选德国或 NAS04；Firefox / Claude 始终固定德国，不跟随常规出口切到 NAS04。
 
-```text
-应用 -> 独立入口 18484 -> 所选 Clash/Wanda 接口 -> 所选落地 -> 网站
-                                               ├ 原德国：VLESS/WSS 443
-                                               └ NAS04：SSH 22
-```
+## 日常使用
 
-NAS04 使用 Windows OpenSSH 动态 SOCKS：本地 `18583` 提供 SOCKS，`18584` 将 SSH 字节流通过 `FIRST-HOP` 转发至 NAS04 的 22 端口。SSH 只连接 loopback 转发端口，以 NAS04 原地址验证已知主机密钥；上游不可用时不会直连 NAS04。无需在 NAS04 安装新服务。SSH 密钥及 known_hosts 仍由 OpenSSH 管理，程序不存密码。
+1. 自己打开需要的 Clash 或 Wanda，选好节点。
+2. 启动桌面唯一入口“落地代理配置器.exe”。选择上游，再启用需要的落地流量模式并应用设置。
+3. Firefox / Claude 使用已有德国专用代理和系统隔离；本软件不代为启动 Claude。
+4. Edge 保留可选接入，但 0.2 使用新的会话扩展，不再写永久代理策略。
+   **扩展真实浏览器验收尚未完成；未安装/未确认连接时不能视为 Edge 已接入。**
+   一次性安装步骤见 [Edge 接入说明](edge-extension/README.md)。
+5. × 收进托盘；彻底退出停止本软件的服务。Edge 撤销接管，Firefox / Claude 保留断网保护。
 
-## 使用
+“已写入”“端口监听”“服务出口通过”“浏览器已接受设置”“浏览器出口通过”是不同证据。
+任何一个都不能单独证明所有应用请求均已保护。新版本启动默认不请求 Edge 接入。
+既有 TCP 连接不能无缝迁移；浏览器完全冻结时事件处理可能延迟。
 
-1. 自行启动 Clash/Wanda，并在客户端内选择订阅和节点。
-2. 打开桌面“落地代理配置器”，按实际端口填写接口并点击“应用接口”；使用 Wanda 时选第一跳来源并点击“应用第一跳”。
-3. 在“落地出口”中选择原德国或 NAS04，点击“应用落地”。运行时会检测实际公网 IP；失败则保留原选择。关闭模式只保存选择，启用后才连接。
-4. 推荐“仅指定应用”：保持系统代理不变。Claude 使用原生应用代理配置。勾选 **“Edge 使用落地代理（含默认链接）”**，日常 Edge 的普通窗口、默认浏览器链接及邮件登录跳转统一使用落地；保留原来的账号、书签和历史，不另建专用浏览器。首次应用时按 Windows 提示授权，保存网页工作后完整退出并重开 Edge，再点击“检查 Edge 出口”。
-5. “刷新状态”和“检测出口”均进行真实出口检测并同步更新状态。成功结果只在同一链路内短期有效；失败、切换或过期不会继续显示旧的绿色成功结果。
+Claude Code 的现有原生引擎路径有独立规则；任意终端/Python/Node 子进程及未来新路径不在全部覆盖声明内。
+保护范围和无账号验收见 [strict/README.md](strict/README.md)。
 
-“仅非中国”和“全局”模式会将系统代理指向 18484，因而可能影响跟随系统代理的 Codex。“仅指定应用”不会这么做。点 × 是收进托盘；“彻底退出”才停落地服务。固定落地的 Claude/Edge 在落地停止时连接失败；要让 Edge 恢复原路线，取消 Edge 开关。切换代理不保证已有连接无缝迁移。
+## 诊断和复盘
 
-“仅指定应用”下，接入 18484 的公共网站流量统一走所选落地，不继承“仅非中国”模式的国内直连规则。本机、局域网及 `slai.edu.cn` 校内服务保留直连例外。
+[2026-11-06 事故复盘](docs/2026-11-06-incident.md) 区分事实、误判、根因、修正和剩余验收。
 
-## Claude 桌面客户端与浏览器
+- 界面“导出网络诊断（只读）”：不访问网站，不启动 Claude，不读取密钥、订阅或账号。
+- CLI：`powershell -File diagnostics/Get-LandingDiagnostics.ps1`。
+- 失败请求不明时，显式以管理员运行 `diagnostics/Trace-EdgeConnections.ps1`：
+  采集 12 秒连接元数据，匹配 Edge 网络 PID、创建时间及证据时效。不自动打开网页、不抓数据包。
+- 结果在 `%LOCALAPPDATA%/LandingProxyConfigurator/Diagnostics`。只分享脱敏 network 报告，原始跟踪留在本机。
+- 没有请求证据就是未验证。别的进程被拦截不能归因给 Edge。
 
-运行 `Install-App-Launchers.ps1` 部署应用启动器，运行 `Configure-Claude-Landing.ps1 -Action Enable` 为 Claude 配置其原生 `egressProxyUrl=http://127.0.0.1:18484`。使用 Claude 支持的用户级 `%LOCALAPPDATA%/Claude-3p/configLibrary` 配置；现场 MSIX 版本也从此处读取，与账号数据使用的虚拟化 Roaming 目录不同。保留已有配置项及备份，不修改账号、认证或部署模式。机器/用户管理策略优先时拒绝假装覆盖。需要 Claude 1.44121.1 或更新版本。
+## 源码、构建和发布
 
-- 配置只在 Claude **完整退出后重开**时生效。已有 Code/Cowork 任务不会被启动器强制结束。
-- 生效后普通 Claude 图标也会加载专用代理；落地停止时该客户端的代理请求失败，不自动回落。Clash/Wanda 和 Codex 不依赖本设置。
-- “核对 Claude 连接”检查一次当前 TCP 连接。发现 7980/7892/7890 或外部直连时报告异常；无连接时报未验证。有 18484 连接也只说明本次观测，不保证每个功能或后续请求。
-- Claude 更新器、外部浏览器登录、SSH 远端会话、忽略代理变量的工具有独立网络路径。代理配置不能替代系统防火墙；不宣称绝对防泄漏。
-- `Configure-Claude-Landing.ps1 -Action Restore` 只恢复本次修改的代理字段，完全退出并重开 Claude 后恢复原路线；不会自动执行。
-- `Start-Claude-Code-Landing.ps1` 才是命令行启动器，环境变量仅作用于该进程链，执行后恢复调用环境。
-- Edge 使用当前 Windows 用户的 `Software\Policies\Microsoft\Edge` 策略，`ProxySettings` 固定为 `127.0.0.1:18484`，同时限制 WebRTC 非代理 UDP、关闭 QUIC、默认拒绝定位。代理策略支持动态刷新，QUIC / WebRTC 策略要求重开浏览器。微软说明 WebRTC 策略不适用于登录个人 Microsoft 账号的配置；不能将策略写入等同于所有账号场景都已验证，也不能据此承诺绝对匿名。
-- `Configure-Edge-Landing.ps1 -Action Enable -AllowElevation` 启用，`-Action Restore -AllowElevation` 恢复原值或原来的缺省状态。首次备份在 `.ssh\GermanyRouter\edge-policy-state.json`；仅恢复本程序拥有的四项策略，发现其他程序的后续修改时拒绝覆盖。若检测到计算机级管理策略则拒绝假装覆盖。此机策略目录只允许管理员写入，因此切换时会请求 Windows 授权。
-- 安装器移除旧的专用 Edge 桌面入口并保存到运行目录的 `retired-edge-launchers`；不再启动 `LandingProxyEdgeProfile`，也不删除其中可能已有的用户数据。“检查 Edge 出口”只打开日常 Edge。
+源码在本仓库；桌面只保留当前 EXE。构建运行 `powershell -File Build.ps1`，产物在 `bin/`。
+运行脚本在 `%USERPROFILE%/.ssh` 和 `.ssh/GermanyRouter`；密钥、运行配置、日志和会话备份不入 Git。
+桌面/脚本升级前备份到 `%LOCALAPPDATA%/LandingProxyConfigurator/Archive` 并保存 SHA256 清单。
 
-未启用 Edge 用户策略时，`node tests/test_browser_landing.mjs <report.json>` 在独立、未登录的临时 Edge 配置中验证落地 IP、WebRTC 和代理断开。WebRTC 使用本地 STUN 服务返回文档保留地址作为测试标记，不将用户真实 IP 发往外部 STUN 测试站。对照组应出现标记，保护组应无 UDP 包/候选地址；不可达代理应返回 `ERR_PROXY_CONNECTION_FAILED`。它不验证 Claude 桌面客户端的 WebRTC。
+禁止将未通过真实浏览器验收的 Edge 会话功能宣称为完整交付。
+部署到现有运行环境时先核对旧持久策略；必要迁移必须显式处理，不能自动覆盖组织策略。
+旧 `Configure-Edge-Landing.ps1` 只保留 Restore/Status 迁移路径，Enable 已拒绝新增永久策略。
+自启保持禁用；构建和部署不重新注册或开启计划任务。
 
-启用当前用户的 Edge 策略后，改用 `node tests/test_browser_landing.mjs <report.json> --policy`：不设置命令行代理或 WebRTC 偏好，检查新启动的 Edge 仅依赖 Windows 策略时的实际出口和本地 STUN 行为。此时不运行不可达代理对照，因为 Edge 策略会覆盖测试命令行的代理端口；不为测试而切断生产落地。临时配置仅用于自动测试，不是交付给用户的专用浏览器。
+## 离线验证
 
-`powershell -File tests/test_edge_policy.ps1` 在独立临时注册表项中验证启用、重复启用、恢复原值/类型、保留无关设置和外部修改冲突保护，不修改真实 Edge 策略。
+- `node --test tests/test_edge_session.mjs`
+- `python tests/test_native_host.py`
+- `python tests/test_no_system_proxy_writes.py`
+- `python tests/test_integrated_route.py`
+- `python tests/test_strict_config.py`
+- `powershell -File tests/test_edge_policy.ps1`（隔离测试注册表项）
+- `powershell -File tests/test_diagnosis.ps1`
+- `powershell -File tests/test_stop_boundary.ps1`（隔离目录与模拟进程）
+- `tests/EdgeLeaseTest.cs`：随机命名管道，不接入真实浏览器。
 
-参考：[Claude 原生代理及绕行边界](https://claude.com/docs/third-party/claude-desktop/network-proxy)、[配置来源与优先级](https://claude.com/docs/third-party/claude-desktop/mdm)、[Edge 代理策略](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/ProxySettings)、[WebRTC 策略适用范围](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/WebRtcLocalhostIpHandling)。
-
-## 源码、配置和升级
-
-桌面只保留“落地代理配置器.exe”一个入口；不再维护“德国代理切换器.exe”副本或旧 Claude 落地启动器。桌面程序备份统一归档到 `%LOCALAPPDATA%\LandingProxyConfigurator\Archive` 的时间戳目录，附原路径和 SHA256 清单，禁止在桌面堆放备份及项目文件。源码、测试及构建产物保留在本仓库。
-
-本仓库是源码；本机运行配置位于 `%USERPROFILE%\.ssh\GermanyRouter`，SSH 启停和路由监督脚本位于 `%USERPROFILE%\.ssh`。`landing-choice.txt` 保存落地选择，`upstream-choice.txt` 保存上游选择。敏感运行配置不进入 Git。
-
-- `GermanyProxyManager.cs`：界面、状态检测。
-- `Landing.Common.ps1`、`Set-Landing-Exit.ps1`：出口验证、运行时选择和失败回滚。
-- `Ensure-Clash-Upstream.ps1`：更新自有配置，保留本机现有节点凭据。
-- `Start-NAS04-Socks.ps1`、`Stop-NAS04-Socks.ps1`：隧道及精确 PID/创建时间清理。
-- `Start-Germany-Router.ps1`：自有 Mihomo 监督，不控制上游客户端。独立核心使用 `landing-router-core.exe`，避免上游按 Clash 核心进程名识别时发生回环排除。首次启动从本机 Mihomo 复制内核，不修改 Clash 原文件。
-
-构建（无需 .NET SDK）：运行 `powershell -File .\Build.ps1`，产物在 `bin/LandingProxyConfigurator.exe`；也可使用下面的命令。
-
-```powershell
-& "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /win32manifest:app.manifest /out:落地代理配置器.exe /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Net.Http.dll .\GermanyProxyManager.cs .\EdgeExitProbe.cs
-```
-
-部署时，将 `Landing.Common.ps1`、`Set-Landing-Exit.ps1`、`Set-Germany-Upstream.ps1`、`Ensure-Clash-Upstream.ps1` 放入 `GermanyRouter`；其余运行脚本放入 `.ssh`。先备份待替换文件，再编译并更新桌面 EXE。代码中的部署路径对应本机用户。更新监督脚本时需要加载新监督进程；保留已有 Mihomo 及系统代理，避免中断其他应用。
-
-## 验证
-
-### 2026-10-27 稳定性修复
-
-- 总监督遇到 NAS04 启动失败时保持运行；每 30 秒验证真实出口。连续两次失败时仅重建同一 NAS04 隧道，两次恢复操作至少间隔 120 秒，不自动换上游或落地。
-- 控制口请求暂时失败不会结束监督。监督异常退出时保留现有转发，写入降级状态，不顺带停止 SSH 或修改系统代理。
-- UI 检查独立监督心跳，超过 90 秒明确报告失联；“仅指定应用”但系统代理仍为 18484 时明确显示冲突。
-- 外部维修删除 Edge ProxySettings 后，可以显式使用 `Configure-Edge-Landing.ps1 -Action Enable -RepairMissingProxy -AllowElevation` 恢复缺失项。保留首次恢复备份，其他策略被修改时仍拒绝覆盖。修复允许在落地异常时写入固定代理，以保持失败断网。
-- 某次 SSH 无法经过一个上游，不足以证明整个订阅永久封禁 22。应区分 CONNECT 响应、SSH 握手、隧道建立和最终出口；单次“出口健康”不是长期稳定性保证。
-
-`python tests/test_landing.py --report <report.json>` 使用独立 18684 / 19690 / 18683 / 18682 端口，验证两个实际出口、SSH 经第一跳、切回清理、上游不可用时禁止直连、失败保留原选择和关闭模式保存行为。需要本机 Mihomo、Python + PyYAML、可用 Clash 接口和已有 NAS04 SSH 密钥。前后对比系统代理、生产监听 PID 和选择文件；不关闭上游客户端进行故障测试。凭据临时副本仅在 `.ssh` 下使用并清理。
-
-此实现与 Clash Verge 链式代理使用相同的 Mihomo 能力，但实例和配置独立。原德国使用 `dialer-proxy`，NAS04 使用显式代理的 TCP 隧道。
-
-参考：[Mihomo 流量隧道](https://wiki.metacubex.one/config/tunnels/)、[dialer-proxy](https://wiki.metacubex.one/en/config/proxies/dialer-proxy/)。
-
-不要提交运行时 YAML、controller secret、VLESS UUID、WebSocket 路径、订阅链接、SSH 私钥或密码。
-
-### 2026-10-28 通道切换与重连升级
-
-- Clash / Wanda 仅作为用户手动选择的本地上游；不读取订阅、不调用上游控制 API、不启动或结束上游进程。独立核心缺失时提示修复安装，不再在运行中从 Clash 安装目录复制核心。
-- 普通通道切换只更新独立核心的 FIRST-HOP，不重载配置。只有明确修改 Clash 接口地址时才更新自有配置；禁止将落地自身端口设成上游。
-- 每次切换使用新连接验证真实落地出口；成功后才保存选择。失败时恢复配置文件原字节和原选择，再验证恢复的出口。关闭模式只保存选择。
-- “重新连接”异步等待结果，复用独立核心，不重启 Clash/Wanda；德国 VLESS 保留已有会话，NAS04 只重建本程序的 SSH 隧道。已有 TCP 会话不能无缝迁移到另一个上游，切换结果验证的是新连接。
-- 监督启动时上游未开、控制口暂不可用或出口检查失败，继续等待同一通道恢复。独立核心意外退出时按原模式和原选择重建；不会自动换成其他通道或直连。
-- 仅指定应用模式不改系统代理，退出也不改系统代理。全局/仅非中国是用户显式选择的系统代理模式，仍会影响跟随系统代理的软件。Edge/Claude 固定落地设置在停止落地后仍然失败断网，需要显式关闭对应应用设置才能恢复普通代理。
-
-验证命令：python tests/test_upstream_reconnect.py --report <report.json>。在独立端口完成两轮 Clash/Wanda 往返、每次重连、错误接口回滚、NAS04/Wanda SSH 重连、缺失上游恢复、独立核心崩溃恢复和关闭模式保存。前后比较生产监听 PID、配置文件、系统代理、Edge 策略、Claude 代理配置，测试不终止生产进程。2026-10-28 通过；NAS04 经 Clash 的可用性不在本次通过结论内。首次测试遇到一次 Wanda 路径出口请求失败，完整复测通过，部分请求耗时约 11 秒；软件恢复能力不能保证上游节点永不波动。
-
-部署升级可以替换 UI 和独立监督进程，保留现有转发核心及应用连接。升级前后必须核验核心 PID、所选通道和系统代理未变；用户正在运行的 Claude/Codex 不需要重启。
-
-勾选或取消 Edge 代理后，配置器会在日常 Edge 打开一个当次有效的本机检测页，由浏览器查询公网 IP 并回传给界面。检测结果显示一分钟。出现出口不符时，保存网页、完整重开 Edge，再点“检查 Edge 出口”。若保存的开关与 Windows 策略不一致，界面会提示补回或清理策略。
-
-### 2026-11-05 统一控制与只读检查
-
-- 上游只选择一次 Clash / Wanda，使用“应用全部设置”同时提交上游和常规落地。Firefox / Claude 的德国固定出口作为应用规则展示，取消第二套选择、启停和启动应用按钮。
-- 常规落地仍可选德国或 NAS04；Firefox / Claude 固定德国，不能因常规落地选择而改为 NAS04。旧配置两个上游不一致时明确显示实际路线，不在界面升级时自动迁移。
-- “关闭落地转发”停止两个自有入口；“重新连接”应用统一选择。独立核心的存在不代表应用已正确接入，Claude Code 原生引擎和任意子进程的完整隔离仍未验收。
-- 删除“启动 Claude 客户端”。“查看 Claude 本机连接”只枚举本机进程和现有 TCP 连接，写入本机报告；不启动 Claude、不访问 Claude 域名、不发送认证请求。无连接只能判为未验证。
-- 服务出口检测访问 IP 查询服务，停止模式不再改走上游或直连进行检测。
-- 两个服务的更新不是无中断网络事务；已有连接无法迁移。统一操作失败时恢复原选择，并分别报告恢复失败，不能显示全部成功。
-
-验证：`python tests/test_integrated_route.py` 10 项离线测试通过；`python tests/test_strict_config.py` 3 项通过；`python tests/test_joint_route_live.py --report <path>` 在独立 18684/19690/18683/18682 完成 Wanda/德国 → Clash/NAS04 → Wanda/德国、错误端口后双选择与配置恢复、真实出口复验。报告见 `tests/reports/joint-route-20261105.json`。这些测试未完整运行两个生产入口的联合切换，也未补齐 Claude Code 隔离验收。
-
-桌面 EXE 和三个配套脚本已更新；用实际窗口确认启动 Claude 按钮已移除，点击只读检查返回“Claude 未运行”。升级前后 7892/7980/18484/18485 的监听 PID、系统代理、选择文件与德国专用配置哈希不变，Claude 未启动。生产旧路线保留：常规 Clash/NAS04，Firefox/Claude Wanda/德国。
-
-### 2026-11-05 地址收纳与 IP.SB 检测页
-
-主界面下拉框显示 Clash/Wanda 及其地址；Clash 地址编辑收进高级设置，确定仅暂存，统一应用才生效。Wanda 目前仍为固定 127.0.0.1:7892。地址收纳版本此前已部署。
-
-本次“检查 Edge 出口（IP.SB）”改动继续由日常 Edge 自动核对出口，收到本机回执后在同一标签页跳转 https://ip.sb/，供用户查看网站提供的地区及运营商信息。自动取 IP 失败时也跳转，配置器保留失败提示；不把跳转本身当作出口验证成功。过渡页提供手动打开链接，设置 no-referrer，不访问 Claude。
-
-新版本已编译。通过模拟检查成功回执与 IP 查询失败两条 JavaScript 分支的跳转顺序，未做真实浏览器端到端测试。刷新运行中配置器的复合部署命令被自动审批以 blocked by policy 拒绝，未执行；IP.SB 改动尚未部署到桌面，已构建 EXE 位于 bin/LandingProxyConfigurator.exe。没有为本次检测启动或重启 Edge/Claude，没有切换代理。
+上述测试不等于真实浏览器、真实账号或电脑重启验收。

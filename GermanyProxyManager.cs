@@ -74,7 +74,6 @@ namespace GermanyProxyManager
         private static readonly string LandingChoiceFile = RouterDir + @"\landing-choice.txt";
         private static readonly string LandingScript = RouterDir + @"\Set-Landing-Exit.ps1";
         private const string InternetSettings = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
-        private static readonly string ProxyBackupFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".ssh\GermanyRouter\proxy-restore.txt");
 
         private readonly Color Navy = Color.FromArgb(24, 49, 83);
         private readonly Color Blue = Color.FromArgb(34, 113, 219);
@@ -115,13 +114,14 @@ namespace GermanyProxyManager
         private ToolStripMenuItem trayStatusItem;
         private bool allowExit;
         private bool cleanupDone;
+        private readonly EdgeSessionLease edgeLease = new EdgeSessionLease();
         private bool trayNoticeShown;
         private bool hasExitTest;
         private bool lastExitMatches;
 
         public MainForm()
         {
-            Text = "落地代理配置器";
+            Text = "落地代理配置器 · 0.2";
             AutoScaleMode = AutoScaleMode.None;
             ClientSize = new Size(1100, Math.Min(1040, Screen.PrimaryScreen.WorkingArea.Height - 90));
             AutoScroll = true;
@@ -276,12 +276,12 @@ namespace GermanyProxyManager
                 new Point(28, 540)
             );
             foreignButton = CreateModeButton(
-                "仅非中国走落地",
+                "接入应用的非中国流量",
                 "中国域名/IP 直接访问\r\n其余流量走所选出口",
                 new Point(294, 540)
             );
             globalButton = CreateModeButton(
-                "全局走落地",
+                "接入应用的公共流量",
                 "本机/局域网保持直连\r\n公共流量走所选出口",
                 new Point(560, 540)
             );
@@ -297,11 +297,15 @@ namespace GermanyProxyManager
 
             offButton.Click += delegate { ApplyMode("off"); };
             foreignButton.Click += delegate { ApplyMode("foreign"); };
-            globalButton.Click += delegate { ApplyMode("global"); };
+            globalButton.Click += delegate { ApplyMode("apps"); };
+            appsButton.Visible = false;
+            offButton.SetBounds(28, 540, 330, 142);
+            foreignButton.SetBounds(374, 540, 330, 142);
+            globalButton.SetBounds(720, 540, 352, 142);
             appsButton.Click += delegate { ApplyMode("apps"); };
 
             edgeLandingCheck = new CheckBox();
-            edgeLandingCheck.Text = "Edge 使用落地代理（含默认链接）";
+            edgeLandingCheck.Text = "Edge 会话接入落地（需要扩展）";
             edgeLandingCheck.AutoCheck = false;
             edgeLandingCheck.Size = new Size(390, 32);
             edgeLandingCheck.Location = new Point(32, 690);
@@ -344,6 +348,18 @@ namespace GermanyProxyManager
             StyleActionButton(edgeTest, Color.White, Navy);
             edgeTest.Click += async delegate { await CheckEdgeExitAsync(); };
             Controls.Add(edgeTest);
+            Button diagnose = new Button {Text="导出网络诊断（只读）", Size=new Size(260,40), Location=new Point(552,726)};
+            StyleActionButton(diagnose, Color.White, Navy);
+            diagnose.Click += async delegate {
+                diagnose.Enabled=false;
+                try {
+                    await Task.Run(delegate {RunHiddenChecked("powershell.exe", "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + Path.Combine(RouterDir,@"diagnostics\Get-LandingDiagnostics.ps1") + "\"");});
+                    MessageBox.Show(File.ReadAllText(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),@"LandingProxyConfigurator\Diagnostics\latest.txt")), "只读诊断结果");
+                } catch(Exception ex){MessageBox.Show(ex.Message,"诊断未完成");}
+                finally {diagnose.Enabled=true;}
+            };
+            Controls.Add(diagnose);
+
             appConnectionLabel = new Label();
             appConnectionLabel.Text = "本机连接检查只读、不发起联网；服务出口检测不访问 Claude、不证明应用已接入。";
             appConnectionLabel.ForeColor = Gray;
@@ -383,7 +399,7 @@ namespace GermanyProxyManager
             testCard.Controls.Add(reconnectButton);
 
             Label footer = new Label();
-            footer.Text = "× 收进托盘；退出停止落地。Clash/Wanda 不受影响；Edge 取消勾选可恢复原代理。";
+            footer.Text = "× 收进托盘；退出撤销 Edge 接管并停止落地。系统设置不变；Firefox / Claude 断网保护保留。";
             footer.ForeColor = Gray;
             footer.AutoSize = true;
             footer.Location = new Point(32, 990);
@@ -393,34 +409,17 @@ namespace GermanyProxyManager
         private void RefreshEdgePolicy()
         {
             if (edgePolicyBusy || edgeLandingCheck == null) return;
-            try {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Policies\Microsoft\Edge")) {
-                    string value = key == null ? "" : Convert.ToString(key.GetValue("ProxySettings", ""));
-                    edgeLandingCheck.Checked = value == "{\"ProxyMode\":\"fixed_servers\",\"ProxyServer\":\"http://127.0.0.1:18484\",\"ProxyBypassList\":\"<-loopback>\"}";
-                    bool requested = EdgeRequested();
-                    if (requested != edgeLandingCheck.Checked) {
-                        edgePolicyLabel.Text = requested ? "要求走落地，但 Edge 代理策略已缺失。请重新勾选。" : "开关记录为关闭，但落地策略仍在。请取消勾选。";
-                        edgePolicyLabel.ForeColor = Red;
-                        return;
-                    }
-                    bool fresh = edgeVerifiedKey == EdgeRouteKey() && DateTime.UtcNow < edgeExpiry;
-                    edgePolicyLabel.Text = fresh ? edgeVerdict : (edgeLandingCheck.Checked
-                        ? "策略已写入，浏览器出口待实测" : "策略未启用，浏览器出口待实测");
-                    edgePolicyLabel.ForeColor = fresh ? edgeVerdictColor : Gray;
-                }
-            } catch { edgePolicyLabel.Text = "无法读取 Edge 设置"; edgePolicyLabel.ForeColor = Orange; }
+            if (ReadMode() == "off") edgeLease.SetEnabled(false);
+            edgeLandingCheck.Checked = edgeLease.Desired;
+            bool fresh = edgeVerifiedKey == EdgeRouteKey() && DateTime.UtcNow < edgeExpiry;
+            edgePolicyLabel.Text = fresh ? edgeVerdict : edgeLease.Status;
+            edgePolicyLabel.ForeColor = fresh ? edgeVerdictColor : Orange;
         }
 
         private string edgeVerifiedKey, edgeVerdict;
         private DateTime edgeExpiry;
         private Color edgeVerdictColor;
-        private bool EdgeRequested()
-        {
-            try {
-                string state = File.ReadAllText(Path.Combine(RouterDir, "edge-policy-state.json"));
-                return System.Text.RegularExpressions.Regex.IsMatch(state, @"""enabled""\s*:\s*true\b");
-            } catch { return edgeLandingCheck.Checked; }
-        }
+        private bool EdgeRequested() { return edgeLease.Desired; }
 
         private string EdgeRouteKey()
         {
@@ -455,18 +454,22 @@ namespace GermanyProxyManager
             }
         }
 
-        private async Task SetEdgePolicyAsync(bool enable)
+        private Task SetEdgePolicyAsync(bool enable)
         {
-            edgePolicyBusy = true;
-            edgeLandingCheck.Enabled = false;
-            edgePolicyLabel.Text = "正在应用；如 Windows 提示，请完成管理员授权…";
             try {
-                await Task.Run(delegate { RunHiddenChecked("powershell.exe",
-                    "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + Path.Combine(RouterDir, "Configure-Edge-Landing.ps1") + "\" -Action " + (enable ? "Enable" : "Restore") + " -AllowElevation", 150000); });
-                edgePolicyBusy = false;
-                await CheckEdgeExitAsync();
-            } catch (Exception ex) { MessageBox.Show(ex.Message, "Edge 设置未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
-            finally { edgePolicyBusy = false; edgeLandingCheck.Enabled = true; RefreshEdgePolicy(); }
+                if (enable) {
+                    foreach (RegistryKey hive in new[] {Registry.CurrentUser, Registry.LocalMachine})
+                        using (RegistryKey key = hive.OpenSubKey(@"Software\Policies\Microsoft\Edge"))
+                            if (key != null && (key.GetValue("ProxySettings") != null || key.GetValue("ProxyMode") != null))
+                                throw new InvalidOperationException("Edge 仍有代理管理策略。先完成旧版迁移；本版本不会覆盖策略。");
+                    if (ReadMode() == "off" || !IsListening(18484))
+                        throw new InvalidOperationException("请先启用落地服务，再请求 Edge 接入。");
+                }
+                edgeVerifiedKey = null;
+                edgeLease.SetEnabled(enable);
+                RefreshEdgePolicy();
+            } catch (Exception ex) { MessageBox.Show(ex.Message, "Edge 会话接入", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            return Task.FromResult(0);
         }
 
         private void BuildTray()
@@ -483,8 +486,6 @@ namespace GermanyProxyManager
             exitItem.Click += delegate
             {
                 allowExit = true;
-                CleanupOnExit();
-                trayIcon.Visible = false;
                 Close();
             };
 
@@ -514,7 +515,10 @@ namespace GermanyProxyManager
                 return;
             }
 
-            CleanupOnExit();
+            if (!CleanupOnExit(!systemExit) && !systemExit) {
+                e.Cancel = true; allowExit = false; return;
+            }
+            edgeLease.Dispose();
             if (trayIcon != null)
             {
                 trayIcon.Visible = false;
@@ -628,14 +632,13 @@ namespace GermanyProxyManager
 
                 if (mode == "off")
                 {
+                    edgeLease.SetEnabled(false);
                     RunCleanup();
                     resultLabel.ForeColor = Green;
                     resultLabel.Text = "全部落地已停止；Firefox / Claude 保持网络限制，不回退其他出口。";
                 }
                 else
                 {
-                    if ((previousMode == "off" || previousMode == "apps") && mode != "apps") SaveProxyState();
-                    if (mode == "apps" && previousMode != "apps") RestoreSavedProxy();
                     File.WriteAllText(ModeFile, mode);
                     if (previousMode == "foreign" || previousMode == "global" || previousMode == "apps")
                         RunRestart();
@@ -643,7 +646,7 @@ namespace GermanyProxyManager
                         RunStart();
                     resultLabel.ForeColor = Orange;
                     resultLabel.Text = mode == "apps"
-                        ? "系统代理保持不变；Claude 使用独立设置，Edge 可用下方开关接入。"
+                        ? "仅管理本软件的落地服务；Edge 通过下方会话开关接入。"
                         : "正在通过所选上游验证落地出口……";
                 }
                 if (mode != "off") await ApplyIntegratedAsync();
@@ -917,7 +920,7 @@ namespace GermanyProxyManager
 
             HighlightMode(offButton, mode == "off");
             HighlightMode(foreignButton, mode == "foreign");
-            HighlightMode(globalButton, mode == "global");
+            HighlightMode(globalButton, mode == "global" || mode == "apps");
             HighlightMode(appsButton, mode == "apps");
             // Preserve the user's staged endpoint until Apply; timer refresh must not discard edits.
 
@@ -1080,9 +1083,9 @@ namespace GermanyProxyManager
 
         private static string ModeDisplay(string mode)
         {
-            if (mode == "foreign") return "仅非中国走落地";
-            if (mode == "global") return "全局走落地";
-            if (mode == "apps") return "仅指定应用（不自动接管）";
+            if (mode == "foreign") return "接入应用的非中国流量";
+            if (mode == "global") return "接入应用的公共流量";
+            if (mode == "apps") return "接入应用的公共流量";
             return "关闭落地转发";
         }
 
@@ -1103,40 +1106,6 @@ namespace GermanyProxyManager
             catch { return false; }
         }
 
-        private static void SaveProxyState()
-        {
-            if (File.Exists(ProxyBackupFile)) return;
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(InternetSettings))
-            {
-                if (key == null) return;
-                File.WriteAllLines(ProxyBackupFile, new[] {
-                    "ProxyEnable=" + Convert.ToInt32(key.GetValue("ProxyEnable", 0)),
-                    "ProxyServer=" + Convert.ToString(key.GetValue("ProxyServer", "")),
-                    "ProxyOverride=" + Convert.ToString(key.GetValue("ProxyOverride", ""))
-                });
-            }
-        }
-
-        private static void RestoreSavedProxy()
-        {
-            if (!File.Exists(ProxyBackupFile)) return;
-            var values = File.ReadAllLines(ProxyBackupFile).ToDictionary(
-                line => line.Split(new[] { '=' }, 2)[0],
-                line => line.Contains("=") ? line.Substring(line.IndexOf('=') + 1) : "");
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(InternetSettings, true))
-            {
-                if (key == null) return;
-                int enabled;
-                if (!Int32.TryParse(values.ContainsKey("ProxyEnable") ? values["ProxyEnable"] : "0", out enabled)) enabled = 0;
-                key.SetValue("ProxyEnable", enabled, RegistryValueKind.DWord);
-                key.SetValue("ProxyServer", values.ContainsKey("ProxyServer") ? values["ProxyServer"] : "", RegistryValueKind.String);
-                key.SetValue("ProxyOverride", values.ContainsKey("ProxyOverride") ? values["ProxyOverride"] : "", RegistryValueKind.String);
-            }
-            InternetSetOption(IntPtr.Zero, 39, IntPtr.Zero, 0);
-            InternetSetOption(IntPtr.Zero, 37, IntPtr.Zero, 0);
-            File.Delete(ProxyBackupFile);
-        }
-
         private static string GetSystemProxy()
         {
             try
@@ -1150,42 +1119,24 @@ namespace GermanyProxyManager
             catch { return ""; }
         }
 
-        private static void SetSystemProxy(string proxy)
+        private bool CleanupOnExit(bool interactive)
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(InternetSettings, true))
-            {
-                key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
-                key.SetValue("ProxyServer", proxy, RegistryValueKind.String);
-                string proxyOverride = Convert.ToString(key.GetValue("ProxyOverride", ""));
-                var overrideItems = new System.Collections.Generic.List<string>(
-                    proxyOverride.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries));
-                foreach (string schoolBypass in new[] { "slai.edu.cn", "*.slai.edu.cn" })
-                {
-                    if (!overrideItems.Exists(item => string.Equals(item, schoolBypass, StringComparison.OrdinalIgnoreCase)))
-                        overrideItems.Add(schoolBypass);
-                }
-                key.SetValue("ProxyOverride", string.Join(";", overrideItems), RegistryValueKind.String);
+            if (cleanupDone) return true;
+            edgeLease.SetEnabled(false);
+            try { RunCleanup(); cleanupDone = true; return true; }
+            catch (Exception ex) {
+                try { File.AppendAllText(Path.Combine(RouterDir, "cleanup-errors.log"), DateTime.UtcNow.ToString("o") + " " + ex.Message + Environment.NewLine); } catch { }
+                if (interactive) MessageBox.Show("停止未完成，程序仍保留：" + ex.Message,
+                    "停止失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
             }
-            InternetSetOption(IntPtr.Zero, 39, IntPtr.Zero, 0);
-            InternetSetOption(IntPtr.Zero, 37, IntPtr.Zero, 0);
-        }
-
-        private void CleanupOnExit()
-        {
-            if (cleanupDone) return;
-            cleanupDone = true;
-            try { RunCleanup(); }
-            catch { }
         }
 
         private static void RunCleanup(bool stopStrict = true)
         {
+            RunHiddenChecked("powershell.exe", "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + CleanupScript + "\"");
             if (stopStrict && File.Exists(Path.Combine(StrictDir, "Set-StrictUpstream.ps1")))
                 RunHiddenChecked("powershell.exe", "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + Path.Combine(StrictDir, "Set-StrictUpstream.ps1") + "\" -Stop");
-            RunHidden(
-                "powershell.exe",
-                "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + CleanupScript + "\""
-            );
         }
 
         private static void RunRestart()
@@ -1238,7 +1189,5 @@ namespace GermanyProxyManager
                 throw new InvalidOperationException("应用失败：" + errorRead.Result.Trim());
         }
 
-        [DllImport("wininet.dll", SetLastError = true)]
-        private static extern bool InternetSetOption(IntPtr hInternet, int option, IntPtr buffer, int length);
     }
 }

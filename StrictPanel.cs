@@ -96,7 +96,7 @@ namespace GermanyProxyManager
             string regular = UpstreamName(ReadUpstreamChoice());
             string protectedUpstream = UpstreamName(ReadStrictChoice());
             appRoutes.Text = "Firefox / Claude 桌面 → " + protectedUpstream + " → 德国固定出口；失败断网\n"
-                + "Edge → " + (edgeLandingCheck.Checked ? regular + " → " + (ReadLandingChoice() == "nas04" ? "NAS04" : "德国") + "（浏览器实际出口须另查）" : "原代理；本程序未接管") + "\n"
+                + "Edge → " + (edgeLandingCheck.Checked ? regular + " → " + (ReadLandingChoice() == "nas04" ? "NAS04" : "德国") + "（仅已确认连接的 Edge 配置；出口另查）" : "未请求接管；浏览器实际状态见会话确认") + "\n"
                 + "Claude Code：代理设置不等于完整隔离；原生引擎及其子进程尚未全部验收。";
             if (!HasStrict) { strictStatus.Text = "Firefox / Claude 的系统隔离尚未安装，不能视为已受保护。"; strictStatus.ForeColor = Red; return; }
             if (!IsListening(18485)) {

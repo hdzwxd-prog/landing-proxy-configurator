@@ -1,11 +1,8 @@
-﻿$ErrorActionPreference = 'Continue'
+﻿$ErrorActionPreference = 'Stop'
 
 $routerDir = Join-Path $env:USERPROFILE '.ssh\GermanyRouter'
 $modeFile = Join-Path $routerDir 'mode.txt'
-$previousMode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim().ToLowerInvariant() } else { 'off' }
 $cleanupLog = Join-Path $routerDir 'cleanup.log'
-$internetSettings = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
-$proxyBackupFile = Join-Path $routerDir 'proxy-restore.txt'
 
 Set-Content -LiteralPath $modeFile -Value 'off' -Encoding ascii
 
@@ -27,24 +24,8 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
 
 & (Join-Path $PSScriptRoot 'Stop-NAS04-Socks.ps1')
 
-if ($previousMode -eq 'apps') {
-    $restoredTo = 'unchanged (apps-only mode)'
-}
-elseif (Test-Path -LiteralPath $proxyBackupFile) {
-    $saved = @{}
-    foreach ($line in Get-Content -LiteralPath $proxyBackupFile) {
-        $parts = $line -split '=', 2
-        if ($parts.Count -eq 2) { $saved[$parts[0]] = $parts[1] }
-    }
-    $enabled = 0
-    [int]::TryParse([string]$saved['ProxyEnable'], [ref]$enabled) | Out-Null
-    New-ItemProperty -Path $internetSettings -Name ProxyEnable -PropertyType DWord -Value $enabled -Force | Out-Null
-    New-ItemProperty -Path $internetSettings -Name ProxyServer -PropertyType String -Value ([string]$saved['ProxyServer']) -Force | Out-Null
-    New-ItemProperty -Path $internetSettings -Name ProxyOverride -PropertyType String -Value ([string]$saved['ProxyOverride']) -Force | Out-Null
-    $restoredTo = "saved proxy ($([string]$saved['ProxyServer']))"
-    Remove-Item -LiteralPath $proxyBackupFile -Force -ErrorAction SilentlyContinue
-}
-else {
-    $restoredTo = 'unchanged (no saved proxy state)'
-}
-Add-Content -LiteralPath $cleanupLog -Value "$([DateTime]::Now.ToString('s')) stopped; restored=$restoredTo"
+# Ownership boundary: stopping this service never restores a stale OS proxy snapshot.
+# System settings belong to Windows and the upstream client chosen by the user.
+$remaining=@(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -in @(18484,18583,18584) })
+if($remaining.Count){throw '落地端口仍在监听；未能确认停止成功。'}
+Add-Content -LiteralPath $cleanupLog -Value "$([DateTime]::Now.ToString('s')) stopped; system_proxy=untouched"

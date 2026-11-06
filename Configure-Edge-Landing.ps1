@@ -18,6 +18,7 @@ try {
         exit 0
     }
     if($Action -eq 'Enable') {
+        throw '新版不再写入永久 Edge 代理策略。请安装会话扩展，并在配置器内启用 Edge。'
         . (Join-Path $PSScriptRoot 'App-Landing.Common.ps1')
         # Restoring an explicitly requested fixed proxy must also be possible
         # during an outage: fail closed instead of inheriting the system route.
