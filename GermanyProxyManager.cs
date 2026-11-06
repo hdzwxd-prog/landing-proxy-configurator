@@ -115,6 +115,7 @@ namespace GermanyProxyManager
         private bool allowExit;
         private bool cleanupDone;
         private readonly EdgeSessionLease edgeLease = new EdgeSessionLease();
+        private EdgeSessionControl edgeControl;
         private bool trayNoticeShown;
         private bool hasExitTest;
         private bool lastExitMatches;
@@ -134,6 +135,7 @@ namespace GermanyProxyManager
             BuildStrictPanel();
             BuildTray();
             RefreshStatus();
+            Shown += delegate { edgeControl = new EdgeSessionControl(HandleEdgeControl); };
 
             FormClosing += HandleFormClosing;
             Resize += delegate
@@ -411,6 +413,7 @@ namespace GermanyProxyManager
             if (edgePolicyBusy || edgeLandingCheck == null) return;
             if (ReadMode() == "off") edgeLease.SetEnabled(false);
             edgeLandingCheck.Checked = edgeLease.Desired;
+            edgeLandingCheck.Enabled = edgeLease.Desired || edgeLease.Accepted;
             bool fresh = edgeVerifiedKey == EdgeRouteKey() && DateTime.UtcNow < edgeExpiry;
             edgePolicyLabel.Text = fresh ? edgeVerdict : edgeLease.Status;
             edgePolicyLabel.ForeColor = fresh ? edgeVerdictColor : Orange;
@@ -456,8 +459,16 @@ namespace GermanyProxyManager
 
         private Task SetEdgePolicyAsync(bool enable)
         {
-            try {
+            try { SetEdgeRequested(enable); }
+            catch (Exception ex) { MessageBox.Show(ex.Message, "Edge 会话接入", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            return Task.FromResult(0);
+        }
+
+        private void SetEdgeRequested(bool enable)
+        {
                 if (enable) {
+                    if (!edgeLease.Accepted)
+                        throw new InvalidOperationException("Edge 扩展尚未连接，本次未改变浏览器代理。");
                     foreach (RegistryKey hive in new[] {Registry.CurrentUser, Registry.LocalMachine})
                         using (RegistryKey key = hive.OpenSubKey(@"Software\Policies\Microsoft\Edge"))
                             if (key != null && (key.GetValue("ProxySettings") != null || key.GetValue("ProxyMode") != null))
@@ -468,8 +479,21 @@ namespace GermanyProxyManager
                 edgeVerifiedKey = null;
                 edgeLease.SetEnabled(enable);
                 RefreshEdgePolicy();
-            } catch (Exception ex) { MessageBox.Show(ex.Message, "Edge 会话接入", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
-            return Task.FromResult(0);
+        }
+
+        private string HandleEdgeControl(string command)
+        {
+            try {
+                return (string)Invoke(new Func<string>(delegate {
+                    if(command=="on" || command=="off")SetEdgeRequested(command=="on");
+                    else if(command!="status")throw new InvalidOperationException("Expected on, off, or status");
+                    return new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new {
+                        ok=true, requested=edgeLease.Desired, accepted=edgeLease.Accepted, status=edgeLease.Status
+                    });
+                }));
+            } catch(Exception ex) {
+                return new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new {ok=false,error=ex.GetBaseException().Message});
+            }
         }
 
         private void BuildTray()
@@ -519,6 +543,7 @@ namespace GermanyProxyManager
                 e.Cancel = true; allowExit = false; return;
             }
             edgeLease.Dispose();
+            if(edgeControl!=null)edgeControl.Dispose();
             if (trayIcon != null)
             {
                 trayIcon.Visible = false;

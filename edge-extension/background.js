@@ -1,5 +1,6 @@
 import {LeaseController} from "./controller.mjs";
 let port;
+let connecting = false;
 const controller = new LeaseController(chrome, message => {
   try { port?.postMessage(message); } catch {}
   chrome.action.setBadgeText({text: message.error ? "!" : message.applied ? "ON" : ""});
@@ -11,9 +12,10 @@ function report(error) {
   chrome.action.setTitle({title: "撤销/接入未完成：" + error.message});
 }
 async function connect() {
-  if (port) return;
-  await controller.reset(); // cold worker / browser startup never trusts a saved enable state
+  if (port || connecting) return;
+  connecting = true;
   try {
+    await controller.reset(); // cold worker / browser startup never trusts a saved enable state
     const connection = chrome.runtime.connectNative("local.landing_proxy.session");
     port = connection;
     connection.onMessage.addListener(message => {
@@ -27,6 +29,7 @@ async function connect() {
       chrome.action.setBadgeText({text: ""});
     });
   } catch (e) { await controller.reset(); report(e); }
+  finally { connecting = false; }
 }
 chrome.runtime.onStartup.addListener(() => { connect().catch(report); });
 chrome.runtime.onInstalled.addListener(() => { connect().catch(report); });

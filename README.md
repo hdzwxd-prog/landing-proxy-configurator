@@ -68,3 +68,12 @@ Claude Code 的现有原生引擎路径有独立规则；任意终端/Python/Nod
 - `tests/EdgeLeaseTest.cs`：随机命名管道，不接入真实浏览器。
 
 上述测试不等于真实浏览器、真实账号或电脑重启验收。
+
+## MCP / 命令行诊断
+
+`diagnostics/Set-EdgeSession.ps1 -Action status` 只读；`on` / `off` 调用与 GUI 相同的开关逻辑。
+命名管道仅授予当前 Windows 用户访问，没有 TCP 控制端口。未连接扩展时拒绝启用，浏览器确认也不等于出口验证。
+`bin/EdgeProbeCli.exe` 打开日常 Edge 中的检测页，读取浏览器实际请求得到的出口，然后跳转 IP.SB；不更改代理，不访问 Claude。
+
+2026-11-06 的无账号真实 Edge 开关/通信桥崩溃/GUI 崩溃测试已通过，见事故复盘。
+日常 Edge 扩展仍未安装；用户不接受手动安装，当前不接管其普通网络，不宣称该项完整交付。
