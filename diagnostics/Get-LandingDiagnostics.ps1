@@ -36,7 +36,13 @@ if($EvidencePath) {
     }|ForEach-Object {[int]$_.ProcessId})
     $attempts=@($evidence.attempts|Where-Object {$_.pid -in $verifiedIds})
 }
+$edgeRequest=$null
+try {
+    $control=Join-Path $PSScriptRoot 'Set-EdgeSession.ps1'
+    if(Test-Path $control){$state=(& $control -Action status)|ConvertFrom-Json;if($state.ok){$edgeRequest=[bool]$state.requested}}
+} catch { } # unavailable GUI is unknown, never a false claim of disabled routing
 $snapshot=[ordered]@{
+    edgeRequested=$edgeRequest
     timestamp=[DateTime]::UtcNow.ToString('o')
     systemProxyEnabled=([int]$settings.ProxyEnable -eq 1)
     systemProxyPort=$(if($settings.ProxyEnable){LocalPort $settings.ProxyServer}else{0})

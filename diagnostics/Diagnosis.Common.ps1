@@ -18,6 +18,9 @@
         }
     }
     if($Snapshot.edgeEstablishedPorts -contains 18484) {
+        if($null -ne $Snapshot.edgeRequested -and $Snapshot.edgeRequested -eq $false) {
+            $result.Add('异常：配置器 Edge 开关关闭，但浏览器仍连接 18484。不能以开关状态判定已恢复普通网络；需核对真实出口和浏览器残留代理状态。')
+        }
         $result.Add('本次快照观察到 Edge 与落地入口的有效连接；这不证明全部请求或未来请求的路径。')
     }
     if($Snapshot.edgeEstablishedPorts -contains 7892 -or $Snapshot.edgeEstablishedPorts -contains 7980) {

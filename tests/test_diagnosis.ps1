@@ -14,3 +14,9 @@ Assert (-not ((Get-LandingFindings $s) -match '已确认 Edge')) 'A live listene
 $s.proxyRepresentationsDiffer=$true
 Assert ((Get-LandingFindings $s) -match '不一致') 'Effective settings drift must be visible'
 'PASS: unknown state, process attribution, refused dead port, live listener, configuration drift'
+$s|Add-Member NoteProperty edgeRequested $false
+$s.edgeEstablishedPorts=@(18484)
+Assert ((Get-LandingFindings $s) -match '开关关闭') 'Disabled switch must not hide observed landing traffic'
+$s.edgeRequested=$null
+Assert (-not ((Get-LandingFindings $s) -match '开关关闭')) 'Unknown GUI state must not be called disabled'
+'PASS: observed Edge route versus requested state'
