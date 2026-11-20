@@ -860,7 +860,10 @@ namespace GermanyProxyManager
                     url = "https://api.ipify.org";
                 }
 
-                string response = await DownloadStringAsync(url, proxy);
+                string response = null;
+                try { response = await DownloadStringAsync(url, proxy); }
+                catch { } // Retry a different measurement site through the SAME landing proxy.
+                if (response == null) response = await DownloadStringAsync("https://ipinfo.io/ip", proxy);
                 string value = response.Trim();
                 if (mode == "off")
                 {
@@ -977,8 +980,8 @@ namespace GermanyProxyManager
             }
             if (ExitResultIsFresh())
             {
-                wandaStatus.Text = label + (lastExitMatches ? "  链路检测通过" : "  链路检测失败");
-                wandaStatus.ForeColor = lastExitMatches ? Green : Red;
+                wandaStatus.Text = label + "  本地接口正在监听（落地结果见下方）";
+                wandaStatus.ForeColor = Green;
                 return;
             }
             try

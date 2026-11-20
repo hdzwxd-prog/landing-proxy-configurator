@@ -16,16 +16,18 @@ try {
     $codeDir=Join-Path $env:LOCALAPPDATA ('Claude-Data\'+$package.PackageFamilyName+'\claude-code')
     $code=@(Get-ChildItem -LiteralPath $codeDir -Filter 'claude.exe' -File -Recurse | Select-Object -ExpandProperty FullName | Sort-Object -Unique)
     if(-not $code.Count){throw 'No Claude Code engines found'}
+    $desktop=@(Get-ChildItem -LiteralPath (Join-Path $package.InstallLocation 'app') -Filter '*.exe' -File -Recurse | Select-Object -ExpandProperty FullName)
+    if(-not $desktop.Count){throw 'Desktop targets missing'}
     $native=Join-Path $root 'StrictNetworkLock.exe'
     $online=Join-Path $root 'isolation-check.exe'
     $offline=Join-Path $root 'isolation-check-offline.exe'
     foreach($path in @($online,$offline)){if(-not(Test-Path -LiteralPath $path)){throw 'Test probe missing'}}
     $addArgs=@('ensure')
-    foreach($path in @($code)+@($online)){$addArgs+=@('--app',$path,'18485')}
+    foreach($path in @($desktop)+@($code)+@($online)){$addArgs+=@('--app',$path,'18485')}
     $addArgs+=@('--app',$offline,'18685')
     & $native @addArgs
     if($LASTEXITCODE -ne 0){throw 'Additive WFP transaction failed; old rules retained'}
-    $targets=@(@($state.targets)+@($code)+@($online) | Where-Object {Test-Path -LiteralPath $_} | Sort-Object -Unique)
+    $targets=@(@($state.targets)+@($desktop)+@($code)+@($online) | Where-Object {Test-Path -LiteralPath $_} | Sort-Object -Unique)
     $verifyArgs=@('verify')
     foreach($path in $targets){$verifyArgs+=@('--app',$path,'18485')}
     $verifyArgs+=@('--app',$offline,'18685')
