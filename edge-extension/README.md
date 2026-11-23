@@ -1,11 +1,23 @@
-# Edge 会话接入（候选功能，真实浏览器验收待完成）
+# Edge 会话接入（2026-11-24 已在日常 Edge 验收开关）
 
 系统代理由 Windows / 用户选择的 Clash、Wanda 管理。本扩展不设置它们。
 扩展只在配置器本次运行明确请求时，通过浏览器 proxy API 设置自己的覆盖项。
 配置器退出/崩溃、通信桥断开时撤销该覆盖项；不是写成 system，也不是自行选择另一个代理。
 Firefox / Claude 的德国断网保护独立保留。
 
-一次性安装需要 Edge 扩展权限（proxy、privacy、nativeMessaging、alarms）：
+本机是 AD 域成员，使用微软支持的本地签名扩展安装策略，无需开发者模式：
+
+1. 构建项目后运行 `Package-LocalExtension.ps1`，将签名包及本机通信桥部署到 LocalAppData。
+2. 管理员运行 `Install-LocalPolicy.ps1`，只添加本扩展的安装策略，保留已有策略。
+3. Edge 加载策略后，配置器收到实际扩展确认才启用开关。
+4. 卸载时管理员运行 `Remove-LocalPolicy.ps1`；只移除匹配所有权记录的单项策略。
+
+签名私钥留在 LocalAppData/EdgeSession/package.pem，ACL 仅当前用户可访问，不提交 Git。
+该方案仅用于域成员设备，非域成员不能沿用静默安装结论。
+
+2026-11-24 日常 Edge 实测：关闭时 140.245.46.71，开启时所选 NAS04 212.121.132.230，关闭后恢复 140.245.46.71；系统代理仍为 Wanda 7892。扩展使用普通落地 18484，Claude 登录独立使用 Firefox/德国 18485。
+
+非域设备的开发测试安装需要 Edge 扩展权限（proxy、privacy、nativeMessaging、alarms）：
 
 1. 构建项目。将本目录作为开发阶段未打包扩展，在 Edge 的扩展管理页加载。
 2. 复制该扩展的 ID，运行

@@ -8,5 +8,7 @@ try {
     if($LASTEXITCODE -ne 0){throw 'Additive isolation failed'}
     & "$root\StrictNetworkLock.exe" verify --app $exe 18485 --app $ff 18485
     if($LASTEXITCODE -ne 0){throw 'WFP verification failed'}
-    @{ok=$true;exe=$exe;hash=(Get-FileHash $exe).Hash;verifiedAt=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content $report
+    $stream=[IO.File]::OpenRead($exe);$sha=[Security.Cryptography.SHA256]::Create()
+    try {$hash=[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','')} finally {$stream.Dispose();$sha.Dispose()}
+    @{ok=$true;exe=$exe;hash=$hash;verifiedAt=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content $report
 } catch { @{ok=$false;error=$_.Exception.Message}|ConvertTo-Json|Set-Content $report;exit 1 }
