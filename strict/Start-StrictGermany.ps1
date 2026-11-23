@@ -6,7 +6,9 @@ $listener=Get-NetTCPConnection -State Listen -LocalPort 18485 -ErrorAction Silen
 if($listener) {
     $owner=Get-Process -Id $listener[0].OwningProcess -ErrorAction Stop
     if($owner.Path -ne $exe){throw '18485 is owned by another program; refused.'}
-} elseif(-not $CheckOnly) {
+} elseif($CheckOnly) {
+    throw 'Germany entry 127.0.0.1:18485 is not running. Open Landing Proxy Configurator and enable the Claude/Firefox Germany route first. Login was not started; no ordinary proxy fallback.'
+} else {
     foreach($name in @('core.out.log','core.err.log')) {
         $log=Join-Path $root $name
         if((Test-Path $log) -and (Get-Item $log).Length -gt 2MB){Move-Item $log ($log+'.previous') -Force}

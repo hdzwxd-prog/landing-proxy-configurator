@@ -15,10 +15,10 @@ try {
     $env:NO_PROXY='localhost,127.0.0.1,::1'
     $env:BROWSER=Join-Path $root 'ProtectedAuthBrowser.exe'
     if(-not(Test-Path -LiteralPath $env:BROWSER)){throw 'Protected browser dispatcher missing'}
+    if($args -notcontains '--help' -and $args -notcontains '--version') { & (Join-Path $root 'Start-StrictGermany.ps1') -CheckOnly }
     if($args.Count -ge 2 -and $args[0] -eq 'auth' -and $args[1] -eq 'login' -and $args -notcontains '--help') {
         Write-Host 'Germany-only login: Firefox will open. Paste the displayed authorization code back into this terminal.'
     }
-    if($args -notcontains '--help' -and $args -notcontains '--version') { & (Join-Path $root 'Start-StrictGermany.ps1') -CheckOnly }
     & $exe @args
     exit $LASTEXITCODE
-} catch { Write-Error $_.Exception.Message; exit 1 }
+} catch { [Console]::Error.WriteLine('Login/start blocked: '+$_.Exception.Message); exit 1 }
